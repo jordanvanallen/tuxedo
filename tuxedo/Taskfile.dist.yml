@@ -1,0 +1,15 @@
+version: '3'
+tasks:
+  clean:
+    cmds:
+      - cargo clean
+  prepare:
+    cmds:
+      - CARGO_NET_GIT_FETCH_WITH_CLI=true cargo fetch
+  build-devel:
+    cmds:
+      - cargo build --release
+  build:
+    cmds:
+      - cargo build --release
+

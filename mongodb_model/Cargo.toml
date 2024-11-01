@@ -1,0 +1,30 @@
+[package]
+name = "mongodb_model"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thiserror = "1.0.64"
+serde = { version = "1.0.210" }
+mongodb_model_derive = { path = "../mongodb_model_derive", optional = true }
+
+[dependencies.mongodb]
+version = "3.1.0"
+features = []
+
+[dependencies.bson]
+version = "2.13.0"
+features = [
+    "serde_with-3",
+    "chrono-0_4"
+]
+
+[features]
+default = ["derive"]
+
+# Provide the derive(MongoModel) macro and associated attribute macros.
+derive = [ "mongodb_model_derive", "serde/derive" ]
+
+# Experimental use only. Include highly unstable alpha-tier APIs not ready for public use. Features likely not properly
+# documented, and subject to breaking changes with no explicit versioning guarantees.
+unstable = []
