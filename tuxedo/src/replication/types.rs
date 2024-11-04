@@ -134,3 +134,18 @@ pub enum ReplicationStrategy {
     Clone,
     Mask,
 }
+
+impl TryFrom<String> for ReplicationStrategy {
+    type Error = String;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        match value.to_lowercase().as_str() {
+            "clone" => Ok(Self::Clone),
+            "mask" => Ok(Self::Mask),
+            other => Err(format!(
+                "{} is not a supported replication strategy.",
+                other
+            )),
+        }
+    }
+}
