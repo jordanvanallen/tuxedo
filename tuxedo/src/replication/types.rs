@@ -4,7 +4,7 @@ use bson::Document;
 use futures_util::TryStreamExt;
 use mongodb::{Database, IndexModel};
 use mongodb_model::MongoModel;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug)]
 pub(crate) struct DatabasePair {
@@ -129,7 +129,7 @@ impl DatabasePair {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ReplicationStrategy {
     Clone,
     Mask,
