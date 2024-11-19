@@ -4,13 +4,13 @@ use async_trait::async_trait;
 use bson::Document;
 use indicatif::ProgressBar;
 use mongodb::options::FindOptions;
-use mongodb_model::MongoModel;
 use rayon::prelude::*;
 use std::marker::PhantomData;
 use std::sync::Arc;
+use serde::{de::DeserializeOwned, Serialize};
 
 #[async_trait]
-pub(crate) trait Task: Send {
+pub(crate) trait Task: Send + Sync {
     async fn run(&self);
     fn update_progress_bar(&self, progress_bar: &ProgressBar, num_records: usize) {
         progress_bar.inc(num_records as u64);
@@ -23,8 +23,9 @@ pub(crate) trait Task: Send {
 
 // TODO: impl Into<FindOptions> for the config? Can we somehow make it into a tuple the
 // function will accept with a splat? is that gross?
-pub(crate) struct ModelTask<T: MongoModel + Mask> {
+pub(crate) struct ModelTask<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> {
     dbs: Arc<DatabasePair>,
+    collection_name: String,
     query_config: QueryConfig,
     strategy: ReplicationStrategy,
     progress_bar: Arc<ProgressBar>,
@@ -42,13 +43,13 @@ pub(crate) struct ReplicatorTask<T: Send> {
 impl<T: Send> ReplicatorTask<T> {
     pub(crate) fn new(
         dbs: Arc<DatabasePair>,
-        collection_name: String,
+        collection_name: impl Into<String>,
         query_config: QueryConfig,
         progress_bar: Arc<ProgressBar>,
     ) -> Self {
         Self {
             dbs,
-            collection_name,
+            collection_name: collection_name.into(),
             query_config,
             progress_bar,
             _phantom_data: PhantomData,
@@ -56,15 +57,17 @@ impl<T: Send> ReplicatorTask<T> {
     }
 }
 
-impl<T: MongoModel + Mask> ModelTask<T> {
+impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> ModelTask<T> {
     pub(crate) fn new(
         dbs: Arc<DatabasePair>,
+        collection_name: impl Into<String>,
         query_config: QueryConfig,
         strategy: ReplicationStrategy,
         progress_bar: Arc<ProgressBar>,
     ) -> Self {
         Self {
             dbs,
+            collection_name: collection_name.into(),
             query_config,
             strategy,
             progress_bar,
@@ -107,12 +110,12 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
 }
 
 #[async_trait]
-impl<T: MongoModel + Mask> Task for ModelTask<T> {
+impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T> {
     async fn run(&self) {
-        let mut records: Vec<T> = match self.dbs.read::<T>(&self.query_config).await {
+        let mut records: Vec<T> = match self.dbs.read::<T>(&self.collection_name, &self.query_config).await {
             Ok(docs) => docs,
             Err(e) => { 
-                println!("Failed to retrieve records from collection: `{}` using QueryConfig: {:?}. Encountered error: {e}", T::COLLECTION_NAME, &self.query_config);
+                println!("Failed to retrieve records from collection: `{}` using QueryConfig: {:?}. Encountered error: {e}", &self.collection_name, &self.query_config);
                 return
             }
         };
@@ -130,11 +133,11 @@ impl<T: MongoModel + Mask> Task for ModelTask<T> {
             ReplicationStrategy::Mask => records.par_iter_mut().for_each(Mask::mask),
         }
 
-        if let Err(e) = self.dbs.write(T::COLLECTION_NAME, &records).await {
+        if let Err(e) = self.dbs.write(&self.collection_name, &records).await {
             println!(
                 "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",
                 records.len(), 
-                T::COLLECTION_NAME, 
+                &self.collection_name, 
                 &self.query_config, 
             );
             return;

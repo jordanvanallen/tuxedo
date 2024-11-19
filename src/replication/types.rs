@@ -3,8 +3,7 @@ use crate::TuxedoResult;
 use bson::Document;
 use futures_util::TryStreamExt;
 use mongodb::{Database, IndexModel};
-use mongodb_model::MongoModel;
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
 #[derive(Debug)]
 pub(crate) struct DatabasePair {
@@ -17,10 +16,14 @@ impl DatabasePair {
         Self { source, target }
     }
 
-    pub(crate) async fn read<T: MongoModel>(&self, config: &QueryConfig) -> TuxedoResult<Vec<T>> {
+    pub(crate) async fn read<T: Serialize + DeserializeOwned + Send + Sync>(
+        &self,
+        collection_name: &str,
+        config: &QueryConfig,
+    ) -> TuxedoResult<Vec<T>> {
         Ok(self
             .source
-            .collection::<T>(T::COLLECTION_NAME)
+            .collection::<T>(collection_name)
             .find(config.query.clone())
             .with_options(config.mongo_find_options())
             .await?

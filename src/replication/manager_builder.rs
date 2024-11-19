@@ -8,7 +8,7 @@ use mongodb::{
     options::{ClientOptions, ReadConcern},
     Client,
 };
-use mongodb_model::MongoModel;
+use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
 
@@ -83,17 +83,23 @@ impl ReplicationManagerBuilder {
         self
     }
 
-    pub fn add_processor<T: MongoModel + Mask + 'static>(self) -> Self {
+    pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static>(
+        self,
+        collection_name: impl Into<String>,
+    ) -> Self {
         let config = ProcessorConfig::default();
-        self.add_processor_with_config::<T>(config)
+        self.add_processor_with_config::<T>(collection_name, config)
     }
 
-    pub fn add_processor_with_config<T: MongoModel + Mask + 'static>(
+    pub fn add_processor_with_config<
+        T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static,
+    >(
         mut self,
+        collection_name: impl Into<String>,
         config: ProcessorConfig,
     ) -> Self {
         self.processors
-            .push(Box::new(ModelProcessor::<T>::new(config)));
+            .push(Box::new(ModelProcessor::<T>::new(collection_name, config)));
         self
     }
 

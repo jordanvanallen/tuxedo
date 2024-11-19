@@ -8,6 +8,3 @@ pub use replication::{
     manager::ReplicationManager, manager_builder::ReplicationManagerBuilder,
     processor::ProcessorConfigBuilder, types::ReplicationStrategy,
 };
-
-pub extern crate mongodb_model;
-pub use mongodb_model::MongoModel;
