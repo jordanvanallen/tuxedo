@@ -1,6 +1,5 @@
-use mongodb_model::MongoDbModelError;
-use tokio::sync::AcquireError;
 use thiserror::Error;
+use tokio::sync::AcquireError;
 
 #[derive(Debug, Error)]
 pub enum TuxedoError {
@@ -16,9 +15,6 @@ pub enum TuxedoError {
     #[error("Database driver error: {0}")]
     Database(#[from] mongodb::error::Error),
 
-    #[error("Error received from the MongoModel crate: {0}")]
-    MongoModelCrateError(#[from] MongoDbModelError),
-
     #[error("Error when acquiring semaphore: {0}")]
     SemaphoreError(#[from] AcquireError),
 
@@ -29,7 +25,9 @@ pub enum TuxedoError {
     FutureJoin(#[from] tokio::task::JoinError),
 
     #[error("Error sending task to worker pool: {0}")]
-    WorkerSend(#[from] tokio::sync::mpsc::error::SendError<Box<dyn crate::replication::task::Task>>),
+    WorkerSend(
+        #[from] tokio::sync::mpsc::error::SendError<Box<dyn crate::replication::task::Task>>,
+    ),
 
     #[error("Generic flagged error: {0}")]
     #[allow(dead_code)]
@@ -38,6 +36,5 @@ pub enum TuxedoError {
     #[error("Uncaught Error type")]
     Other(#[from] Box<dyn std::error::Error + Send + Sync>),
 }
-
 
 pub type TuxedoResult<T> = std::result::Result<T, TuxedoError>;

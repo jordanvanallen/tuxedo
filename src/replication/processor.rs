@@ -7,7 +7,7 @@ use crate::Mask;
 use async_trait::async_trait;
 use bson::Document;
 use indicatif::ProgressBar;
-use mongodb_model::MongoModel;
+use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::sync::{mpsc, Semaphore};
@@ -25,15 +25,17 @@ pub(crate) trait Processor: Send + Sync {
     );
 }
 
-pub(crate) struct ModelProcessor<T: MongoModel + Mask> {
+pub(crate) struct ModelProcessor<T: Mask + Serialize + DeserializeOwned + Send + Sync> {
     config: ProcessorConfig,
+    collection_name: String,
     _phantom_data: PhantomData<T>,
 }
 
-impl<T: MongoModel + Mask> ModelProcessor<T> {
-    pub(crate) fn new(config: ProcessorConfig) -> Self {
+impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> ModelProcessor<T> {
+    pub(crate) fn new(collection_name: impl Into<String>, config: ProcessorConfig) -> Self {
         Self {
             config,
+            collection_name: collection_name.into(),
             _phantom_data: PhantomData,
         }
     }
@@ -56,7 +58,9 @@ impl<T: Send + Sync> ReplicatorProcessor<T> {
 }
 
 #[async_trait]
-impl<T: MongoModel + Mask + 'static> Processor for ModelProcessor<T> {
+impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
+    for ModelProcessor<T>
+{
     async fn run(
         &self,
         dbs: Arc<DatabasePair>,
@@ -67,14 +71,14 @@ impl<T: MongoModel + Mask + 'static> Processor for ModelProcessor<T> {
     ) {
         let batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
         let total_documents: usize = match dbs
-            .read_total_documents::<T>(T::COLLECTION_NAME, self.config.query.clone())
+            .read_total_documents::<T>(&self.collection_name, self.config.query.clone())
             .await
         {
             Ok(num_docs) => num_docs,
             Err(e) => {
                 println!(
                     "Could not get total number of documents for collection: `{}`. Collection will be skipped. Encountered error: {e}",
-                    T::COLLECTION_NAME,
+                    &self.collection_name,
                 );
                 return;
             }
@@ -84,17 +88,17 @@ impl<T: MongoModel + Mask + 'static> Processor for ModelProcessor<T> {
         progress_bar.set_length(total_documents as u64);
         progress_bar.set_message(format!(
             "{} ({})",
-            T::COLLECTION_NAME,
+            &self.collection_name,
             std::any::type_name::<T>()
                 .split("::")
                 .last()
                 .expect("Expected to get model name for progress bar")
         ));
 
-        if let Err(e) = dbs.copy_indexes(T::COLLECTION_NAME).await {
+        if let Err(e) = dbs.copy_indexes(&self.collection_name).await {
             println!(
                 "Error when copying indexes for collection `{}` from source to target - Error: {:?}",
-                T::COLLECTION_NAME,
+                &self.collection_name,
                 e
             )
         }
@@ -120,6 +124,7 @@ impl<T: MongoModel + Mask + 'static> Processor for ModelProcessor<T> {
 
             let task = Box::new(ModelTask::<T>::new(
                 dbs,
+                self.collection_name.clone(),
                 QueryConfig::new(query, skip, limit, batch_size),
                 strategy,
                 progress_bar,

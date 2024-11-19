@@ -15,11 +15,10 @@ tuxedo = { version = "0.1.0" }
 
 ```rust
 use tuxedo::{
-  Mask, MongoModel, ProcessorConfigBuilder, ReplicationManagerBuilder, ReplicationStrategy, TuxedoResult,
+  Mask, ProcessorConfigBuilder, ReplicationManagerBuilder, ReplicationStrategy, TuxedoResult,
 };
 
-#[derive(Clone, Debug, Serialize, Deserialize, MongoModel)]
-#[mongo_model(collection = "users")]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct User {
     #[serde(rename = "_id")]
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -44,7 +43,7 @@ async fn main() -> TuxedoResult<()> {
         .target_db("target_db_name")
         .batch_size(2500 as usize)
         .strategy(ReplicationStrategy::Mask)
-        .add_processor::<User>()
+        .add_processor::<User>("users")
         .build()
         .await?;
 
