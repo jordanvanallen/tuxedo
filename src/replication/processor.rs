@@ -69,6 +69,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
     ) {
+        println!("Starting ModelProcessor for `{}`", &self.collection_name);
         let batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
         let total_documents: usize = match dbs
             .read_total_documents::<T>(&self.collection_name, self.config.query.clone())
@@ -122,6 +123,10 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
             let strategy = strategy.clone();
             let progress_bar = Arc::clone(&progress_bar);
 
+            println!(
+                "Generating Box<ModelTask> batch: #{} for collection: {}",
+                batch_index, &self.collection_name
+            );
             let task = Box::new(ModelTask::<T>::new(
                 dbs,
                 self.collection_name.clone(),
@@ -154,6 +159,10 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
     ) {
+        println!(
+            "Starting ReplicatorProcessor for `{}`",
+            &self.collection_name
+        );
         let batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
         let total_documents: usize = match dbs
             .read_total_documents::<T>(&self.collection_name, self.config.query.clone())
@@ -204,6 +213,10 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
             let query = self.config.query.clone();
             let progress_bar = Arc::clone(&progress_bar);
 
+            println!(
+                "Generating Box<ReplicatorTask> batch: #{} for collection: {}",
+                batch_index, &self.collection_name
+            );
             let task = Box::new(ReplicatorTask::<T>::new(
                 dbs,
                 self.collection_name.clone(),

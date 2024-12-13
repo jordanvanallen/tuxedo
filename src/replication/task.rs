@@ -23,6 +23,7 @@ pub(crate) trait Task: Send + Sync {
 
 // TODO: impl Into<FindOptions> for the config? Can we somehow make it into a tuple the
 // function will accept with a splat? is that gross?
+#[derive(Debug)]
 pub(crate) struct ModelTask<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> {
     dbs: Arc<DatabasePair>,
     collection_name: String,
@@ -32,6 +33,7 @@ pub(crate) struct ModelTask<T: Mask + Serialize + DeserializeOwned + Send + Sync
     _phantom_data: PhantomData<T>,
 }
 
+#[derive(Debug)]
 pub(crate) struct ReplicatorTask<T: Send> {
     dbs: Arc<DatabasePair>,
     collection_name: String,
@@ -79,6 +81,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> ModelTask<T
 #[async_trait]
 impl<T: Send + Sync> Task for ReplicatorTask<T> {
     async fn run(&self) {
+        println!("Running replicator batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
         let records: Vec<Document> = match self.dbs.read_documents(&self.collection_name, &self.query_config).await {
             Ok(docs) => docs,
             Err(e) => { 
@@ -95,6 +98,7 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
             return;
         }
 
+        println!("Writing batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
         if let Err(e) = self.dbs.write::<Document>(&self.collection_name, &records).await {
             println!(
                 "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",
@@ -105,6 +109,7 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
             return;
         }
 
+        println!("Wrote batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
         self.update_progress_bar(&self.progress_bar, records.len());
     }
 }
@@ -112,6 +117,7 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
 #[async_trait]
 impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T> {
     async fn run(&self) {
+        println!("Running model batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
         let mut records: Vec<T> = match self.dbs.read::<T>(&self.collection_name, &self.query_config).await {
             Ok(docs) => docs,
             Err(e) => { 
@@ -128,11 +134,14 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T>
             return;
         }
 
+        println!("Strategy is: {:?} -> If masking will now mask", &self.strategy);
         match self.strategy {
             ReplicationStrategy::Clone => (),
             ReplicationStrategy::Mask => records.par_iter_mut().for_each(Mask::mask),
         }
+        println!("Masked records");
 
+        println!("Writing model batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
         if let Err(e) = self.dbs.write(&self.collection_name, &records).await {
             println!(
                 "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",

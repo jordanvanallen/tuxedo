@@ -76,6 +76,7 @@ impl ReplicationManager {
                             let permit = semaphore.clone().acquire_owned().await.expect("Semaphore closed");
                             join_set.spawn(async move {
                                 let _permit = permit;
+                                println!("Calling task#run() from thread");
                                 task.run().await
                             });
                         }
@@ -102,17 +103,21 @@ impl ReplicationManager {
         });
 
         // Wait for all the processors to finish generating tasks
+        println!("Joining all thread/process handles");
         join_all(processor_handles)
             .await
             .into_iter()
             .collect::<Result<Vec<()>, _>>()?;
 
         // All tasks are completed, so we can drop the receiver to close the channel
+        println!("Dropping task_sender, all threads/tasks generated");
         drop(self.task_sender);
 
         // Wait for the task runner to finish running all the tasks
+        println!("Running runner handle");
         runner_handle.await.expect("Runner failed");
 
+        println!("Returning OK");
         Ok(())
     }
 }
