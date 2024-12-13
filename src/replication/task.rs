@@ -79,7 +79,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> ModelTask<T
 #[async_trait]
 impl<T: Send + Sync> Task for ReplicatorTask<T> {
     async fn run(&self) {
-        println!("Running replicator batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
+        println!("Running replicator batch task for collection: {} with settings: {}", &self.collection_name, &self.query_config);
         let records: Vec<Document> = match self.dbs.read_documents(&self.collection_name, &self.query_config).await {
             Ok(docs) => docs,
             Err(e) => { 
@@ -90,13 +90,13 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
 
         if records.is_empty() {
             println!(
-                "No records found for batch. Skipping insertion. QueryConfig used: {:?}",
+                "No records found for batch. Skipping insertion. QueryConfig used: {}",
                 &self.query_config
             );
             return;
         }
 
-        println!("Writing batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
+        println!("Writing batch task for collection: {} with settings: {}", &self.collection_name, &self.query_config);
         if let Err(e) = self.dbs.write::<Document>(&self.collection_name, &records).await {
             println!(
                 "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",
@@ -107,7 +107,7 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
             return;
         }
 
-        println!("Wrote batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
+        println!("Wrote batch task for collection: {} with settings: {}", &self.collection_name, &self.query_config);
         self.update_progress_bar(&self.progress_bar, records.len());
     }
 }
@@ -115,7 +115,7 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
 #[async_trait]
 impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T> {
     async fn run(&self) {
-        println!("Running model batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
+        println!("Running model batch task for collection: {} with settings: {}", &self.collection_name, &self.query_config);
         let mut records: Vec<T> = match self.dbs.read::<T>(&self.collection_name, &self.query_config).await {
             Ok(docs) => docs,
             Err(e) => { 
@@ -132,14 +132,13 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T>
             return;
         }
 
-        println!("Strategy is: {:?} -> If masking will now mask", &self.strategy);
         match self.strategy {
             ReplicationStrategy::Clone => (),
             ReplicationStrategy::Mask => records.par_iter_mut().for_each(Mask::mask),
         }
         println!("Masked records");
 
-        println!("Writing model batch task for collection: {} with settings: {:?}", &self.collection_name, &self.query_config);
+        println!("Writing model batch task for collection: {} with settings: {}", &self.collection_name, &self.query_config);
         if let Err(e) = self.dbs.write(&self.collection_name, &records).await {
             println!(
                 "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",
@@ -178,5 +177,11 @@ impl QueryConfig {
             .skip(self.skip as u64)
             .batch_size(self.batch_size as u32)
             .build()
+    }
+}
+
+impl std::fmt::Display for QueryConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "*** QueryConfig ***: Query: {:?} - Skip: {} - Limit - {} - BatchSize - {}", self.query, self.skip, self.limit, self.batch_size)
     }
 }
