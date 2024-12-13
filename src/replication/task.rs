@@ -23,7 +23,6 @@ pub(crate) trait Task: Send + Sync {
 
 // TODO: impl Into<FindOptions> for the config? Can we somehow make it into a tuple the
 // function will accept with a splat? is that gross?
-#[derive(Debug)]
 pub(crate) struct ModelTask<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> {
     dbs: Arc<DatabasePair>,
     collection_name: String,
@@ -33,7 +32,6 @@ pub(crate) struct ModelTask<T: Mask + Serialize + DeserializeOwned + Send + Sync
     _phantom_data: PhantomData<T>,
 }
 
-#[derive(Debug)]
 pub(crate) struct ReplicatorTask<T: Send> {
     dbs: Arc<DatabasePair>,
     collection_name: String,
