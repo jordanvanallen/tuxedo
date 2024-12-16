@@ -1,6 +1,6 @@
 use super::{
     manager::ReplicationConfig,
-    task::{ModelTask, QueryConfig, ReplicatorTask, Task},
+    task::{ModelTask, QueryConfig, ReplicatorTask, Task, WriteConfig},
     types::DatabasePair,
 };
 use crate::Mask;
@@ -103,6 +103,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
 
         let batch_count = (total_documents + batch_size - 1) / batch_size;
         let strategy = default_config.strategy;
+        let write_config = WriteConfig::new(default_config.bypass_document_validation);
 
         for batch_index in 0..batch_count {
             let skip = batch_index * batch_size;
@@ -124,6 +125,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
                 dbs,
                 self.collection_name.clone(),
                 QueryConfig::new(query, skip, limit, batch_size),
+                write_config.clone(),
                 strategy,
                 progress_bar,
             ));
@@ -179,6 +181,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
         }
 
         let batch_count = (total_documents + batch_size - 1) / batch_size;
+        let write_config = WriteConfig::new(default_config.bypass_document_validation);
 
         for batch_index in 0..batch_count {
             let skip = batch_index * batch_size;
@@ -199,6 +202,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
                 dbs,
                 self.collection_name.clone(),
                 QueryConfig::new(query, skip, limit, batch_size),
+                write_config.clone(),
                 progress_bar,
             ));
 

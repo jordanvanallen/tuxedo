@@ -13,6 +13,7 @@ pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
     pub(crate) batch_size: usize,
     pub(crate) strategy: ReplicationStrategy,
+    pub(crate) bypass_document_validation: bool,
 }
 
 impl Default for ReplicationConfig {
@@ -21,6 +22,7 @@ impl Default for ReplicationConfig {
             batch_size: 1_000,
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
+            bypass_document_validation: false,
         }
     }
 }
