@@ -1,10 +1,11 @@
 [package]
 name = "tuxedo"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Jordan Van Allen <jordanvanallen@gmail.com>"]
 description = "A parallel masking library for MongoDB"
 license = "MIT OR Apache-2.0"
+repository = "https://github.com/jordanvanallen/tuxedo"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
