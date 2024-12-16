@@ -62,3 +62,12 @@ They can be configured individually using a `ProcessorConfigBuilder` alongside t
 ### Replicators
 
 Replicators are used for collections that need to be replicated, but do not need to be masked. They have the benefit of not requiring a struct to replicate the data, but are also significantly slower as they as (de)serialized using a bson::Document, which is much less ideal then a defined struct. It is recommended for larger collections to use a struct and define the `Mask` trait with a NOP to avoid the masking portion, but allow for much faster replication speeds.
+
+## License
+
+Licensed under either of
+
+* Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or <http://www.apache.org/licenses/LICENSE-2.0>)
+* MIT license ([LICENSE-MIT](LICENSE-MIT) or <http://opensource.org/licenses/MIT>)
+
+at your option.

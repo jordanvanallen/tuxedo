@@ -10,7 +10,7 @@ use mongodb::{
 };
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 
 pub struct ReplicationManagerBuilder {
     source_uri: Option<String>,
@@ -170,13 +170,11 @@ impl ReplicationManagerBuilder {
         );
 
         let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count);
-        let semaphore = Arc::new(Semaphore::new(self.config.thread_count));
 
         let task_manager = ReplicationManager {
             dbs,
             processors: self.processors,
             config: self.config,
-            semaphore,
             task_receiver,
             task_sender,
         };

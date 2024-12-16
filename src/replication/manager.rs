@@ -4,7 +4,7 @@ use crate::TuxedoResult;
 use futures_util::future::join_all;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 use tokio::task;
 use tokio::task::JoinSet;
 
@@ -29,7 +29,6 @@ pub struct ReplicationManager {
     pub(crate) processors: Vec<Box<dyn Processor>>,
     pub(crate) task_receiver: mpsc::Receiver<Box<dyn Task>>,
     pub(crate) task_sender: mpsc::Sender<Box<dyn Task>>,
-    pub(crate) semaphore: Arc<Semaphore>,
     pub(crate) config: ReplicationConfig,
     pub(crate) dbs: Arc<DatabasePair>,
 }
@@ -49,7 +48,6 @@ impl ReplicationManager {
             .into_iter()
             .map(|processor| {
                 let dbs = Arc::clone(&self.dbs);
-                let semaphore = Arc::clone(&self.semaphore);
                 let task_sender = self.task_sender.clone();
                 let default_config = self.config.clone();
                 let progress_bar = multi_progress.add(ProgressBar::new(0));
@@ -57,7 +55,7 @@ impl ReplicationManager {
 
                 task::spawn(async move {
                     processor
-                        .run(dbs, semaphore, task_sender, default_config, progress_bar)
+                        .run(dbs, task_sender, default_config, progress_bar)
                         .await;
                 })
             })
@@ -65,7 +63,6 @@ impl ReplicationManager {
 
         // Spawn ReplicationTask runners
         let runner_handle = task::spawn({
-            let semaphore = Arc::clone(&self.semaphore);
             let mut task_receiver = self.task_receiver;
             async move {
                 let mut join_set = JoinSet::new();
@@ -73,9 +70,7 @@ impl ReplicationManager {
                 loop {
                     tokio::select! {
                         Some(task) = task_receiver.recv() => {
-                            let permit = semaphore.clone().acquire_owned().await.expect("Semaphore closed");
                             join_set.spawn(async move {
-                                let _permit = permit;
                                 task.run().await
                             });
                         }

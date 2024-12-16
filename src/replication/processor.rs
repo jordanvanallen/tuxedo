@@ -10,7 +10,7 @@ use indicatif::ProgressBar;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Semaphore};
+use tokio::sync::mpsc;
 
 #[async_trait]
 #[async_trait]
@@ -18,7 +18,6 @@ pub(crate) trait Processor: Send + Sync {
     async fn run(
         &self,
         dbs: Arc<DatabasePair>,
-        semaphore: Arc<Semaphore>,
         task_sender: mpsc::Sender<Box<dyn Task>>,
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
@@ -64,7 +63,6 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
     async fn run(
         &self,
         dbs: Arc<DatabasePair>,
-        semaphore: Arc<Semaphore>,
         task_sender: mpsc::Sender<Box<dyn Task>>,
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
@@ -130,16 +128,10 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
                 progress_bar,
             ));
 
-            let permit = semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("Expected OwnedSemaphorePermit");
             if task_sender.send(task).await.is_err() {
                 // Channel closed, stop sending tasks
                 break;
             }
-            drop(permit);
         }
     }
 }
@@ -149,7 +141,6 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
     async fn run(
         &self,
         dbs: Arc<DatabasePair>,
-        semaphore: Arc<Semaphore>,
         task_sender: mpsc::Sender<Box<dyn Task>>,
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
@@ -211,16 +202,10 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
                 progress_bar,
             ));
 
-            let permit = semaphore
-                .clone()
-                .acquire_owned()
-                .await
-                .expect("Expected OwnedSemaphorePermit");
             if task_sender.send(task).await.is_err() {
                 // Channel closed, stop sending tasks
                 break;
             }
-            drop(permit);
         }
     }
 }
