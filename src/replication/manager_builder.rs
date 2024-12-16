@@ -83,6 +83,11 @@ impl ReplicationManagerBuilder {
         self
     }
 
+    pub fn bypass_document_validation<B: Into<bool>>(mut self, bypass: B) -> Self {
+        self.config.bypass_document_validation = bypass.into();
+        self
+    }
+
     pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static>(
         self,
         collection_name: impl Into<String>,

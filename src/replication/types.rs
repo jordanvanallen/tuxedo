@@ -1,4 +1,4 @@
-use crate::replication::task::QueryConfig;
+use crate::replication::task::{QueryConfig, WriteConfig};
 use crate::TuxedoResult;
 use bson::Document;
 use futures_util::TryStreamExt;
@@ -62,11 +62,13 @@ impl DatabasePair {
     pub(crate) async fn write<T: Send + Sync + Serialize>(
         &self,
         collection_name: &str,
+        write_config: &WriteConfig,
         records: &Vec<T>,
     ) -> TuxedoResult<()> {
         self.target
             .collection::<T>(collection_name)
             .insert_many(records)
+            .with_options(write_config.insert_many_options())
             .await?;
         Ok(())
     }
