@@ -102,7 +102,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
             )
         }
 
-        let batch_count = (total_documents + batch_size - 1) / batch_size;
+        let batch_count = total_documents.div_ceil(batch_size);
         let strategy = default_config.strategy;
         let write_config = WriteConfig::new(default_config.bypass_document_validation);
 
@@ -132,6 +132,12 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
             ));
 
             if task_sender.send(task).await.is_err() {
+                println!(
+                    "Failed to send task to worker pool for collection '{}' (batch {}/{}). Channel closed, stopping processor.",
+                    &self.collection_name,
+                    batch_index + 1,
+                    batch_count
+                );
                 // Channel closed, stop sending tasks
                 break;
             }
@@ -185,7 +191,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
             )
         }
 
-        let batch_count = (total_documents + batch_size - 1) / batch_size;
+        let batch_count = total_documents.div_ceil(batch_size);
         let write_config = WriteConfig::new(default_config.bypass_document_validation);
 
         for batch_index in 0..batch_count {
@@ -212,6 +218,12 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
             ));
 
             if task_sender.send(task).await.is_err() {
+                println!(
+                    "Failed to send task to worker pool for collection '{}' (batch {}/{}). Channel closed, stopping processor.",
+                    &self.collection_name,
+                    batch_index + 1,
+                    batch_count
+                );
                 // Channel closed, stop sending tasks
                 break;
             }
