@@ -13,7 +13,6 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 
 #[async_trait]
-#[async_trait]
 pub(crate) trait Processor: Send + Sync {
     async fn run(
         &self,
@@ -22,6 +21,8 @@ pub(crate) trait Processor: Send + Sync {
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
     );
+
+    fn collection_name(&self) -> &str;
 }
 
 pub(crate) struct ModelProcessor<T: Mask + Serialize + DeserializeOwned + Send + Sync> {
@@ -136,6 +137,10 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
             }
         }
     }
+
+    fn collection_name(&self) -> &str {
+        &self.collection_name
+    }
 }
 
 #[async_trait]
@@ -211,6 +216,10 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
                 break;
             }
         }
+    }
+
+    fn collection_name(&self) -> &str {
+        &self.collection_name
     }
 }
 

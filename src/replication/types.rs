@@ -102,19 +102,43 @@ impl DatabasePair {
 
     // Database Initialization (testing) functions
 
-    pub(crate) async fn clear_target_collections(&self) -> TuxedoResult<()> {
-        let collections = self.target.list_collection_names().await?;
+    pub(crate) async fn clear_target_collections(&self, collection_names: &[String]) -> TuxedoResult<()> {
+        let target_collections = self.target.list_collection_names().await?;
 
         println!("******************************");
-        for collection_name in collections.into_iter() {
-            println!("Dropping collection: {}", collection_name);
-            self.target
-                .collection::<mongodb::bson::Document>(&collection_name)
-                .drop()
-                .await?;
+        for collection_name in target_collections.into_iter() {
+            // Skip system collections:
+            // 1. Collections with system.* prefix
+            // 2. Collections in admin database
+            // 3. Collections in config database
+            // 4. Special system collections
+            if collection_name.starts_with("system.") || 
+               collection_name.starts_with("admin.") ||
+               collection_name.starts_with("config.") ||
+               collection_name.ends_with(".system.roles") ||
+               collection_name.ends_with(".system.users") ||
+               collection_name.ends_with(".system.version") ||
+               collection_name.ends_with(".system.buckets") ||
+               collection_name.ends_with(".system.profile") ||
+               collection_name.ends_with(".system.js") ||
+               collection_name.ends_with(".system.views") {
+                println!("Skipping system collection: {}", collection_name);
+                continue;
+            }
+
+            // Only drop collections that are in our processor list
+            if collection_names.contains(&collection_name) {
+                println!("Dropping collection: {}", collection_name);
+                self.target
+                    .collection::<mongodb::bson::Document>(&collection_name)
+                    .drop()
+                    .await?;
+            } else {
+                println!("Skipping collection not in processor list: {}", collection_name);
+            }
         }
         println!("******************************");
-        println!("All collections have been dropped from target database.\n\n");
+        println!("Target database collections have been selectively dropped.\n\n");
         Ok(())
     }
 

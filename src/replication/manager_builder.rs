@@ -169,9 +169,13 @@ impl ReplicationManagerBuilder {
             .await
             .expect("Could not create test connection to target database");
 
-        println!("Dropping all collections from target database before beginning...");
-        dbs.clear_target_collections().await.expect(
-            "Expected to successfully drop all target database collections before replication",
+        println!("Dropping collections from target database before beginning...");
+        // Collect collection names from processors
+        let collection_names: Vec<String> = self.processors.iter()
+            .map(|p| p.collection_name().to_string())
+            .collect();
+        dbs.clear_target_collections(&collection_names).await.expect(
+            "Expected to successfully drop target database collections before replication",
         );
 
         let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count);
