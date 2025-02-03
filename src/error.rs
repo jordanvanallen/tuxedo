@@ -24,11 +24,6 @@ pub enum TuxedoError {
     #[error("Error joining future: {0}")]
     FutureJoin(#[from] tokio::task::JoinError),
 
-    #[error("Error sending task to worker pool: {0}")]
-    WorkerSend(
-        #[from] tokio::sync::mpsc::error::SendError<Box<dyn crate::replication::task::Task>>,
-    ),
-
     #[error("Generic flagged error: {0}")]
     #[allow(dead_code)]
     Generic(String),
