@@ -8,7 +8,7 @@
 
 ```toml
 [dependencies]
-tuxedo = { version = "0.1.0" }
+tuxedo = { version = "0.3.1" }
 ```
 
 ## Usage
@@ -42,7 +42,7 @@ async fn main() -> TuxedoResult<()> {
         .source_db("source_db_name")
         .target_db("target_db_name")
         .batch_size(2500 as usize)
-        .strategy(ReplicationStrategy::Mask)
+        .strategy(ReplicationStrategy::Mask) 
         .add_processor::<User>("users")
         .build()
         .await?;
