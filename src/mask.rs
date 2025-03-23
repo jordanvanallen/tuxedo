@@ -21,9 +21,7 @@ use fake::{
 pub trait Mask {
     fn mask(&mut self);
 
-    fn seed() -> i32 {
-        12345
-    }
+    fn seed() -> i32 { 12345 }
 
     /// Provides the ability to fake a person's name.
     fn fake_name() -> String {

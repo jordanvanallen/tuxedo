@@ -1,6 +1,7 @@
 mod error;
 mod mask;
 mod replication;
+mod database;
 
 pub use error::{TuxedoError, TuxedoResult};
 pub use mask::Mask;

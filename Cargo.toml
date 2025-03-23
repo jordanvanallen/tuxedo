@@ -38,9 +38,9 @@ indicatif = { version = "0.17.9" }
 num_cpus = "1.16.0"
 
 [dependencies.mongodb]
-version = "3.1.1"
+version = "3.2.3"
 features = []
 
 [dependencies.bson]
-version = "2.13.0"
+version = "2.14.0"
 features = ["serde_with", "chrono-0_4"]

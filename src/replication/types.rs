@@ -75,7 +75,7 @@ impl DatabasePair {
 
     // Indexes
 
-    /// Copies the indexes from the source collection to the equivilant target collection
+    /// Copies the indexes from the source collection to the equivalent target collection
     pub(crate) async fn copy_indexes(&self, collection_name: &str) -> TuxedoResult<()> {
         let mut source_index_cursor = self
             .source
