@@ -27,6 +27,9 @@ futures-util = "0.3.31"
 async-trait = "0.1.83"
 rayon = "1.10.0"
 
+# Dates/Time
+chrono = "0.4.40"
+
 # Data faking / masking
 rand = "0.8.5"
 fake = "3.0"

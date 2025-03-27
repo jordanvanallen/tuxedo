@@ -1,9 +1,18 @@
+use super::{
+    connection_testable::ConnectionTestable,
+    index::DestinationIndexManager,
+    write::WriteOperations,
+};
 use crate::TuxedoResult;
 
-use super::connection_testable::ConnectionTestable;
-use super::write::WriteOperations;
-
-pub trait Destination: WriteOperations + ConnectionTestable {
+pub trait Destination
+where
+    Self: WriteOperations
+    + DestinationIndexManager
+    + ConnectionTestable
+    + Send
+    + Sync,
+{
     async fn prepare_database(&self) -> TuxedoResult<()>;
     async fn clear_database(&self, entity_names: &[String]) -> TuxedoResult<()>;
 }

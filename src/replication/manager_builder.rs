@@ -1,71 +1,52 @@
 use super::manager::{ReplicationConfig, ReplicationManager};
 use super::processor::{Processor, ProcessorConfig};
-use crate::replication::processor::{ModelProcessor, ReplicatorProcessor};
-use crate::replication::types::{DatabasePair, ReplicationStrategy};
+use crate::database::{traits::{Destination, Source}, DatabasePair};
+use crate::replication::processor::ModelProcessor;
+use crate::replication::types::ReplicationStrategy;
 use crate::{Mask, TuxedoError, TuxedoResult};
-use bson::Document;
-use mongodb::{
-    options::{ClientOptions, ReadConcern},
-    Client,
-};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 
-pub struct ReplicationManagerBuilder {
-    source_uri: Option<String>,
-    target_uri: Option<String>,
-    source_db: Option<String>,
-    target_db: Option<String>,
+pub struct ReplicationManagerBuilder<S, D>
+where
+    S: Source,
+    D: Destination,
+{
+    source: Option<S>,
+    destination: Option<D>,
     thread_count: usize,
     config: ReplicationConfig,
-    processors: Vec<Box<dyn Processor>>,
+    processors: Vec<Box<dyn Processor<S, D>>>,
 }
 
-impl Default for ReplicationManagerBuilder {
+impl<S: Source, D: Destination> Default for ReplicationManagerBuilder<S, D> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ReplicationManagerBuilder {
+impl<S: Source, D: Destination> ReplicationManagerBuilder<S, D> {
     pub fn new() -> Self {
         // Default to all available threads
         let available_threads = num_cpus::get();
 
         Self {
-            source_uri: None,
-            target_uri: None,
-            source_db: None,
-            target_db: None,
+            source: None,
+            destination: None,
             thread_count: available_threads,
             config: ReplicationConfig::default(),
             processors: Vec::new(),
         }
     }
 
-    pub fn source_uri<S: Into<String>>(mut self, uri: S) -> Self {
-        self.source_uri = Some(uri.into());
+    pub fn source(mut self, source: S) -> Self {
+        self.source = Some(source);
         self
     }
 
-    pub fn target_uri<S: Into<String>>(mut self, uri: S) -> Self {
-        self.target_uri = Some(uri.into());
-        self
-    }
-
-    pub fn source_db<S: Into<String>>(mut self, db_name: S) -> Self {
-        self.source_db = Some(db_name.into());
-        self
-    }
-
-    pub fn target_db<S: Into<String>>(mut self, db_name: S) -> Self {
-        self.target_db = Some(db_name.into());
-        self
-    }
-
-    pub fn thread_count<S: Into<usize>>(mut self, count: S) -> Self {
-        self.thread_count = count.into();
+    pub fn destination(mut self, destination: D) -> Self {
+        self.destination = Some(destination);
         self
     }
 
@@ -73,20 +54,25 @@ impl ReplicationManagerBuilder {
     // Config
     // ******
 
-    pub fn strategy<S: Into<ReplicationStrategy>>(mut self, strategy: S) -> Self {
+    pub fn thread_count<C: Into<usize>>(mut self, count: C) -> Self {
+        self.thread_count = count.into();
+        self
+    }
+
+    pub fn strategy<X: Into<ReplicationStrategy>>(mut self, strategy: X) -> Self {
         self.config.strategy = strategy.into();
         self
     }
 
-    pub fn batch_size<S: Into<usize>>(mut self, size: S) -> Self {
+    pub fn batch_size<X: Into<u64>>(mut self, size: X) -> Self {
         self.config.batch_size = size.into();
         self
     }
 
-    pub fn bypass_document_validation<B: Into<bool>>(mut self, bypass: B) -> Self {
-        self.config.bypass_document_validation = bypass.into();
-        self
-    }
+    // pub fn bypass_document_validation<B: Into<bool>>(mut self, bypass: B) -> Self {
+    //     self.config.bypass_document_validation = bypass.into();
+    //     self
+    // }
 
     pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static>(
         self,
@@ -108,75 +94,50 @@ impl ReplicationManagerBuilder {
         self
     }
 
-    pub fn add_replicator(self, collection_name: impl Into<String>) -> Self {
-        let config = ProcessorConfig::default();
-        self.add_replicator_with_config(collection_name.into(), config)
-    }
+    // pub fn add_replicator(self, collection_name: impl Into<String>) -> Self {
+    //     let config = ProcessorConfig::default();
+    //     self.add_replicator_with_config(collection_name.into(), config)
+    // }
+    //
+    // pub fn add_replicator_with_config(
+    //     mut self,
+    //     collection_name: impl Into<String>,
+    //     config: ProcessorConfig,
+    // ) -> Self {
+    //     self.processors
+    //         .push(Box::new(ReplicatorProcessor::<Document>::new(
+    //             config,
+    //             collection_name.into(),
+    //         )));
+    //     self
+    // }
 
-    pub fn add_replicator_with_config(
-        mut self,
-        collection_name: impl Into<String>,
-        config: ProcessorConfig,
-    ) -> Self {
-        self.processors
-            .push(Box::new(ReplicatorProcessor::<Document>::new(
-                config,
-                collection_name.into(),
-            )));
-        self
-    }
-
-    pub async fn build(self) -> TuxedoResult<ReplicationManager> {
-        let source_uri = self
-            .source_uri
-            .ok_or(TuxedoError::ConfigError("No source_uri provided.".into()))?;
-        let target_uri = self
-            .target_uri
-            .ok_or(TuxedoError::ConfigError("No target_uri provided.".into()))?;
-
-        let max_pool_size = self.config.thread_count as u32;
-        let min_pool_size = self.config.thread_count as u32;
-
-        let mut source_client_options = ClientOptions::parse(source_uri).await?;
-        source_client_options.max_pool_size = max_pool_size.into();
-        source_client_options.min_pool_size = min_pool_size.into();
-        // Make the database Read only as much as we have control to do
-        source_client_options.read_concern = ReadConcern::majority().into();
-        let source_client = Client::with_options(source_client_options)?;
-
-        let mut target_client_options = ClientOptions::parse(target_uri).await?;
-        target_client_options.max_pool_size = max_pool_size.into();
-        target_client_options.min_pool_size = min_pool_size.into();
-        let target_client = Client::with_options(target_client_options)?;
-
-        let source_db_name = self
-            .source_db
-            .ok_or(TuxedoError::ConfigError("No source_db provided.".into()))?;
-        let target_db_name = self
-            .target_db
-            .ok_or(TuxedoError::ConfigError("No target_db provided.".into()))?;
+    pub async fn build(self) -> TuxedoResult<ReplicationManager<S, D>> {
+        let dbs = Arc::new(DatabasePair::new(
+            self.source.ok_or(TuxedoError::ConfigError("No source database provided".into()))?,
+            self.destination.ok_or(TuxedoError::ConfigError("No destination database provided".into()))?,
+        ));
 
         // Ensure our database connections are actually valid and we can make the connection
         // We intentionally want to blow up here if we can't connect to *either* DB to avoid a giant mess
-        let dbs = Arc::new(DatabasePair::new(
-            source_client.database(&source_db_name),
-            target_client.database(&target_db_name),
-        ));
-        dbs.test_database_collection_source()
+        dbs.source
+            .test_database_connection()
             .await
             .expect("Could not create test connection to source database");
-        dbs.test_database_collection_target()
+        dbs.destination
+            .test_database_connection()
             .await
-            .expect("Could not create test connection to target database");
+            .expect("Could not create test connection to destination database");
 
-        println!("Dropping collections from target database before beginning...");
+        println!("Dropping tables/collections from destination database before beginning...");
         // Collect collection names from processors
         let collection_names: Vec<String> = self.processors.iter()
-            .map(|p| p.collection_name().to_string())
+            .map(|p| p.entity_name().to_string())
             .collect();
-        dbs.clear_target_collections(&collection_names).await.expect(
-            "Expected to successfully drop target database collections before replication",
-        );
+        dbs.destination
+            .clear_database(&collection_names)
+            .await
+            .expect("Expected to successfully drop destination database tables/collections before replication");
 
         let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count);
 

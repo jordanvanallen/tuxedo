@@ -24,8 +24,10 @@ pub enum TuxedoError {
     #[error("Error joining future: {0}")]
     FutureJoin(#[from] tokio::task::JoinError),
 
+    #[error("Error generating index: {0}")]
+    IndexError(String),
+
     #[error("Generic flagged error: {0}")]
-    #[allow(dead_code)]
     Generic(String),
 
     #[error("Uncaught Error type")]

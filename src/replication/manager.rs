@@ -1,19 +1,19 @@
 use super::{processor::Processor, task::Task};
-use crate::replication::types::{DatabasePair, ReplicationStrategy};
+use crate::database::traits::{Destination, Source};
+use crate::database::DatabasePair;
+use crate::replication::types::ReplicationStrategy;
 use crate::TuxedoResult;
 use futures_util::future::join_all;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use std::sync::Arc;
 use tokio::sync::mpsc;
-use tokio::task;
-use tokio::task::JoinSet;
+use tokio::{task, task::JoinSet};
 
 #[derive(Debug, Clone)]
 pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
-    pub(crate) batch_size: usize,
+    pub(crate) batch_size: u64,
     pub(crate) strategy: ReplicationStrategy,
-    pub(crate) bypass_document_validation: bool,
 }
 
 impl Default for ReplicationConfig {
@@ -22,27 +22,34 @@ impl Default for ReplicationConfig {
             batch_size: 1_000,
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
-            bypass_document_validation: false,
         }
     }
 }
 
-pub struct ReplicationManager {
-    pub(crate) processors: Vec<Box<dyn Processor>>,
+pub struct ReplicationManager<S, D>
+where
+    S: Source,
+    D: Destination,
+{
+    pub(crate) processors: Vec<Box<dyn Processor<S, D>>>,
     pub(crate) task_receiver: mpsc::Receiver<Box<dyn Task>>,
     pub(crate) task_sender: mpsc::Sender<Box<dyn Task>>,
     pub(crate) config: ReplicationConfig,
-    pub(crate) dbs: Arc<DatabasePair>,
+    pub(crate) dbs: Arc<DatabasePair<S, D>>,
 }
 
-impl ReplicationManager {
+impl<S, D> ReplicationManager<S, D>
+where
+    S: Source + 'static,
+    D: Destination + 'static,
+{
     pub async fn run(self) -> TuxedoResult<()> {
         let multi_progress = Arc::new(MultiProgress::new());
         let progress_style = ProgressStyle::with_template(
             "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
         )
-        .expect("Expected to set progress bar styling")
-        .progress_chars("█▓▒░");
+            .expect("Expected to set progress bar styling")
+            .progress_chars("█▓▒░");
 
         // Spawn processor runners
         let processor_handles: Vec<_> = self

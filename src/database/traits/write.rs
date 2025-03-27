@@ -1,11 +1,13 @@
 use crate::TuxedoResult;
 
 pub trait WriteOperations {
-    async fn write<T, O>(
+    type WriteOptions: Send + Sync;
+
+    async fn write<T>(
         &self,
         entity_name: &str,
-        options: O,
         records: &Vec<T>,
+        // options: impl Into<Option<Self::WriteOptions>>,
     ) -> TuxedoResult<()>
     where
         T: serde::Serialize + Send + Sync;

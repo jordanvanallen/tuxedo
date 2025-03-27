@@ -1,4 +1,10 @@
 mod mongodb;
-mod pair;
+pub(crate) mod pair;
 mod postgres;
-mod traits;
+pub(crate) mod traits;
+pub(crate) mod pagination;
+pub(crate) mod index;
+
+
+pub(crate) use pair::DatabasePair;
+

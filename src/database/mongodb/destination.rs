@@ -1,45 +1,55 @@
-use mongodb::{Client, Database, options::InsertManyOptions};
-use mongodb::options::ClientOptions;
-use serde::Serialize;
-
-use crate::database::traits::{ConnectionTestable, Destination, WriteOperations};
+use crate::database::index::IndexConfig;
+use crate::database::mongodb::destination_builder::MongodbDestinationBuilder;
+use crate::database::traits::{ConnectionTestable, Destination, DestinationIndexManager, WriteOperations};
 use crate::TuxedoResult;
+use mongodb::{options::InsertManyOptions, Client, Database};
+use serde::Serialize;
 
 pub struct MongodbDestination {
     client: Client,
     db: Database,
+    write_options: Option<InsertManyOptions>,
 }
 
 impl MongodbDestination {
-    pub async fn new<O>(db_name: &str, options: O) -> TuxedoResult<Self>
-    where
-        O: Into<ClientOptions>,
-    {
-        // TODO: Should we be helping here set things like pool sizes based on threads?
-        let client = Client::with_options(options.into())?;
-        let db = client.database(db_name);
+    pub fn builder() -> MongodbDestinationBuilder {
+        MongodbDestinationBuilder::new()
+    }
 
-        Ok(Self { client, db })
+    pub fn new(client: Client, db: Database, write_options: Option<InsertManyOptions>) -> Self
+    {
+        Self { client, db, write_options }
     }
 }
 
 impl WriteOperations for MongodbDestination {
-    async fn write<T, O>(
+    type WriteOptions = InsertManyOptions;
+
+    async fn write<T>(
         &self,
         collection_name: &str,
-        options: O,
         records: &Vec<T>,
+        // options: impl Into<Option<Self::WriteOptions>>,
     ) -> TuxedoResult<()>
     where
         T: Serialize + Send + Sync,
-        O: Into<Option<InsertManyOptions>>,
     {
         self.db
             .collection::<T>(collection_name)
             .insert_many(records)
-            .with_options(options.into())
+            .with_options(self.write_options.clone())
             .await?;
         Ok(())
+    }
+}
+
+impl DestinationIndexManager for MongodbDestination {
+    async fn create_index(&self, config: &IndexConfig) -> TuxedoResult<()> {
+        todo!()
+    }
+
+    async fn drop_index(&self, index_name: &str) -> TuxedoResult<()> {
+        todo!()
     }
 }
 
@@ -52,7 +62,7 @@ impl ConnectionTestable for MongodbDestination {
 
 impl Destination for MongodbDestination {
     async fn prepare_database(&self) -> TuxedoResult<()> {
-        self.client.warm_connection_pool();
+        self.client.warm_connection_pool().await;
         Ok(())
     }
 
@@ -84,7 +94,7 @@ impl Destination for MongodbDestination {
             // Only drop collections that are in our processor list
             if collection_names.contains(&collection_name) {
                 println!("Dropping collection: {}", collection_name);
-                self.target
+                self.db
                     .collection::<mongodb::bson::Document>(&collection_name)
                     .drop()
                     .await?;
