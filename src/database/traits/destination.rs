@@ -4,7 +4,9 @@ use super::{
     write::WriteOperations,
 };
 use crate::TuxedoResult;
+use async_trait::async_trait;
 
+#[async_trait]
 pub trait Destination
 where
     Self: WriteOperations

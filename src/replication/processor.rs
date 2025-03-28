@@ -8,7 +8,6 @@ use crate::database::traits::{Destination, Source};
 use crate::database::DatabasePair;
 use crate::Mask;
 use async_trait::async_trait;
-use bson::Document;
 use indicatif::ProgressBar;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
@@ -33,29 +32,36 @@ where
     fn entity_name(&self) -> &str;
 }
 
-pub(crate) struct ModelProcessor<T: Mask + Serialize + DeserializeOwned + Send + Sync> {
-    config: ProcessorConfig,
-    // TODO: This should become a generic name like entity_name
+pub(crate) struct ModelProcessor<T, S>
+where
+    T: Mask + Serialize + DeserializeOwned + Send + Sync,
+    S: Source,
+{
+    config: ProcessorConfig<S::Query>,
     entity_name: String,
-    _phantom_data: PhantomData<T>,
+    _phantom_data: PhantomData<(T, S)>,
 }
 
-impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> ModelProcessor<T> {
-    pub(crate) fn new(collection_name: impl Into<String>, config: ProcessorConfig) -> Self {
+impl<T, S> ModelProcessor<T, S>
+where
+    T: Mask + Serialize + DeserializeOwned + Send + Sync,
+    S: Source,
+{
+    pub(crate) fn new(entity_name: impl Into<String>, config: ProcessorConfig<S::Query>) -> Self {
         Self {
             config,
-            entity_name: collection_name.into(),
+            entity_name: entity_name.into(),
             _phantom_data: PhantomData,
         }
     }
 }
 
 #[async_trait]
-impl<T, S, D> Processor<S, D> for ModelProcessor<T>
+impl<T, S, D> Processor<S, D> for ModelProcessor<T, S>
 where
     T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static,
-    S: Source,
-    D: Destination,
+    S: Source + 'static,
+    D: Destination + 'static,
 {
     async fn run(
         &self,
@@ -64,7 +70,10 @@ where
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
     ) {
-        let batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
+        let batch_size = self
+            .config
+            .batch_size
+            .unwrap_or(default_config.batch_size);
 
         let total_records = match dbs
             .source
@@ -155,49 +164,111 @@ where
     }
 }
 
-pub struct ProcessorConfig {
-    batch_size: Option<u64>,
-    query: Document,
+/// Configures how a processor will handle an entity replication
+#[derive(Debug, Clone, Default)]
+pub struct ProcessorConfig<Q> {
+    /// Optional batch size, will use the default from ReplicationConfig if None
+    pub(crate) batch_size: Option<u64>,
+    /// Query to filter which records to replicate
+    pub(crate) query: Q,
 }
 
-impl Default for ProcessorConfig {
-    fn default() -> Self {
-        ProcessorConfigBuilder::new().build()
+impl<Q> ProcessorConfig<Q> {
+    /// Create a new ProcessorConfig with the given query and batch size
+    ///
+    /// Note: This is a convenience method for crate usage. 
+    /// External users should use the builder pattern.
+    pub(crate) fn new(query: Q, batch_size: Option<u64>) -> Self {
+        Self {
+            query,
+            batch_size,
+        }
+    }
+
+    /// Create a builder for ProcessorConfig
+    pub fn builder() -> ProcessorConfigBuilder<Q>
+    where
+        Q: Default,
+    {
+        ProcessorConfigBuilder::default()
     }
 }
 
-pub struct ProcessorConfigBuilder {
-    config: ProcessorConfig,
+/// Builder for ProcessorConfig to allow flexible configuration
+#[derive(Default)]
+pub struct ProcessorConfigBuilder<Q>
+where
+    Q: Default,
+{
+    config: ProcessorConfig<Q>,
 }
 
-impl Default for ProcessorConfigBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl ProcessorConfigBuilder {
+impl<Q: Default> ProcessorConfigBuilder<Q> {
+    /// Create a new ProcessorConfigBuilder with default query
     pub fn new() -> Self {
-        let config = ProcessorConfig {
-            batch_size: None,
-            query: Document::new(),
-        };
-        Self { config }
+        Default::default()
     }
 
-    pub fn batch_size<S: Into<Option<u64>>>(mut self, size: S) -> Self {
+    /// Set the query
+    pub fn query(mut self, query: Q) -> Self {
+        self.config.query = query;
+        self
+    }
+
+    /// Set the batch size
+    pub fn batch_size(mut self, size: impl Into<Option<u64>>) -> Self {
         self.config.batch_size = size.into();
         self
     }
 
-    pub fn query<Q: Into<Document>>(mut self, query: Q) -> Self {
-        self.config.query = query.into();
-        self
-    }
-
-    pub fn build(self) -> ProcessorConfig {
+    /// Build the final ProcessorConfig
+    pub fn build(self) -> ProcessorConfig<Q> {
         self.config
     }
+}
+
+/// Factory that knows the source type and creates processors for specific entity types
+// This factory lets us prevent the user from passing in S to every #add_processor() function
+// call to get S::Query to know the appropriate type for that database implementation
+pub struct ProcessorFactory<S>
+where
+    S: Source + 'static,
+{
+    _phantom: PhantomData<S>,
+}
+
+impl<S> ProcessorFactory<S>
+where
+    S: Source + 'static,
+{
+    /// Create a new processor factory for the given source type
+    pub fn new() -> Self {
+        Self {
+            _phantom: PhantomData,
+        }
+    }
+
+    /// Create a model processor with the given configuration
+    ///
+    /// If options in the config are None, they will use default values from ReplicationConfig
+    pub fn create_model_processor<T>(
+        &self,
+        entity_name: impl Into<String>,
+        config: ProcessorConfig<S::Query>,
+    ) -> ModelProcessor<T, S>
+    where
+        T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static,
+    {
+        ModelProcessor::new(entity_name, config)
+    }
+
+    // Get a processor config builder
+    // pub fn config_builder(&self) -> ProcessorConfigBuilder<S::Query>
+    // where
+    //     S::Query: Default,
+    // {
+    //     ProcessorConfigBuilder::default()
+    // }
 }
 
 // pub(crate) struct ReplicatorProcessor<T: Send + Sync> {

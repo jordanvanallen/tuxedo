@@ -2,6 +2,7 @@ use crate::database::index::IndexConfig;
 use crate::database::mongodb::destination_builder::MongodbDestinationBuilder;
 use crate::database::traits::{ConnectionTestable, Destination, DestinationIndexManager, WriteOperations};
 use crate::TuxedoResult;
+use async_trait::async_trait;
 use mongodb::{options::InsertManyOptions, Client, Database};
 use serde::Serialize;
 
@@ -22,6 +23,7 @@ impl MongodbDestination {
     }
 }
 
+#[async_trait]
 impl WriteOperations for MongodbDestination {
     type WriteOptions = InsertManyOptions;
 
@@ -43,6 +45,7 @@ impl WriteOperations for MongodbDestination {
     }
 }
 
+#[async_trait]
 impl DestinationIndexManager for MongodbDestination {
     async fn create_index(&self, config: &IndexConfig) -> TuxedoResult<()> {
         todo!()
@@ -53,6 +56,7 @@ impl DestinationIndexManager for MongodbDestination {
     }
 }
 
+#[async_trait]
 impl ConnectionTestable for MongodbDestination {
     async fn test_database_connection(&self) -> TuxedoResult<()> {
         self.db.list_collection_names().await?;
@@ -60,13 +64,14 @@ impl ConnectionTestable for MongodbDestination {
     }
 }
 
+#[async_trait]
 impl Destination for MongodbDestination {
     async fn prepare_database(&self) -> TuxedoResult<()> {
         self.client.warm_connection_pool().await;
         Ok(())
     }
 
-    async fn clear_database(&self, collection_names: &[String]) -> TuxedoResult<()> {
+    async fn clear_database(&self, entity_names: &[String]) -> TuxedoResult<()> {
         let collections = self.db.list_collection_names().await?;
 
         println!("******************************");
@@ -76,23 +81,20 @@ impl Destination for MongodbDestination {
             // 2. Collections in admin database
             // 3. Collections in config database
             // 4. Special system collections
+            //
+            // This shouldn't happen in reality unless a library user for
+            // whatever reason points to a system collection as their model's
+            // collection by accident, but better safe than sorry
             if collection_name.starts_with("system.")
                 || collection_name.starts_with("admin.")
                 || collection_name.starts_with("config.")
-                || collection_name.ends_with(".system.roles")
-                || collection_name.ends_with(".system.users")
-                || collection_name.ends_with(".system.version")
-                || collection_name.ends_with(".system.buckets")
-                || collection_name.ends_with(".system.profile")
-                || collection_name.ends_with(".system.js")
-                || collection_name.ends_with(".system.views")
             {
                 println!("Skipping system collection: {}", collection_name);
                 continue;
             }
 
             // Only drop collections that are in our processor list
-            if collection_names.contains(&collection_name) {
+            if entity_names.contains(&collection_name) {
                 println!("Dropping collection: {}", collection_name);
                 self.db
                     .collection::<mongodb::bson::Document>(&collection_name)

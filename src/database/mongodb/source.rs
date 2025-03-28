@@ -10,6 +10,7 @@ use futures_util::TryStreamExt;
 use mongodb::{bson::Document, options::{CountOptions, FindOptions}, Client, Database, IndexModel};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
+use async_trait::async_trait;
 
 pub struct MongodbSource {
     client: Client,
@@ -51,6 +52,7 @@ impl MongodbSource {
     }
 }
 
+#[async_trait]
 impl Source for MongodbSource {
     async fn prepare_database(&self) -> TuxedoResult<()> {
         self.client.warm_connection_pool().await;
@@ -58,6 +60,7 @@ impl Source for MongodbSource {
     }
 }
 
+#[async_trait]
 impl ConnectionTestable for MongodbSource {
     async fn test_database_connection(&self) -> TuxedoResult<()> {
         self.db.list_collection_names().await?;
@@ -65,11 +68,12 @@ impl ConnectionTestable for MongodbSource {
     }
 }
 
+#[async_trait]
 impl SourceIndexManager for MongodbSource {
-    async fn list_indexes(&self, collection_name: &str) -> TuxedoResult<SourceIndexes> {
+    async fn list_indexes(&self, entity_name: &str) -> TuxedoResult<SourceIndexes> {
         let source_indexes: Vec<IndexModel> = self
             .db
-            .collection::<Document>(collection_name)
+            .collection::<Document>(entity_name)
             .list_indexes()
             .await?
             .try_collect()
@@ -122,7 +126,7 @@ impl SourceIndexManager for MongodbSource {
                     .as_ref()
                     .and_then(|opts| opts.name.clone())
                     .unwrap_or_else(|| {
-                        self.generate_default_index_name(&collection_name, &fields)
+                        self.generate_default_index_name(&entity_name, &fields)
                     });
 
                 IndexConfig {
@@ -135,7 +139,7 @@ impl SourceIndexManager for MongodbSource {
             .collect();
 
         let source_index = SourceIndexes {
-            entity_name: collection_name.into(),
+            entity_name: entity_name.into(),
             indexes,
         };
 
@@ -143,6 +147,7 @@ impl SourceIndexManager for MongodbSource {
     }
 }
 
+#[async_trait]
 impl ReadOperations for MongodbSource {
     type Query = Document;
     type ReadOptions = FindOptions;

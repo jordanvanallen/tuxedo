@@ -1,13 +1,17 @@
 use crate::database::index::{IndexConfig, SourceIndexes};
 use crate::{TuxedoError, TuxedoResult};
+use async_trait::async_trait;
 
+#[async_trait]
 pub trait SourceIndexManager {
     async fn list_indexes(&self, entity_name: &str) -> TuxedoResult<SourceIndexes>;
 }
 
+#[async_trait]
 pub trait DestinationIndexManager {
     async fn create_index(&self, config: &IndexConfig) -> TuxedoResult<()>;
     async fn drop_index(&self, index_name: &str) -> TuxedoResult<()>;
+    
     async fn create_indexes(&self, source_indexes: SourceIndexes) -> TuxedoResult<()> {
         for index_config in source_indexes.indexes.into_iter() {
             self

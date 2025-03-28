@@ -1,5 +1,7 @@
 use crate::TuxedoResult;
+use async_trait::async_trait;
 
+#[async_trait]
 pub trait WriteOperations {
     type WriteOptions: Send + Sync;
 

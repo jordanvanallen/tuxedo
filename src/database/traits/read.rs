@@ -1,9 +1,11 @@
 use crate::database::pagination::PaginationOptions;
 use crate::TuxedoResult;
 use serde::de::DeserializeOwned;
+use async_trait::async_trait;
 
+#[async_trait]
 pub trait ReadOperations {
-    type Query: Send + Sync + Clone + std::fmt::Display;
+    type Query: Send + Sync + Clone + Default + std::fmt::Display;
     type ReadOptions: Send + Sync + Clone;
     type RecordCountOptions: Send + Sync + Clone;
 

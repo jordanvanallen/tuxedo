@@ -1,7 +1,6 @@
 use super::manager::{ReplicationConfig, ReplicationManager};
-use super::processor::{Processor, ProcessorConfig};
+use super::processor::{Processor, ProcessorConfig, ProcessorFactory};
 use crate::database::{traits::{Destination, Source}, DatabasePair};
-use crate::replication::processor::ModelProcessor;
 use crate::replication::types::ReplicationStrategy;
 use crate::{Mask, TuxedoError, TuxedoResult};
 use serde::{de::DeserializeOwned, Serialize};
@@ -10,23 +9,32 @@ use tokio::sync::mpsc;
 
 pub struct ReplicationManagerBuilder<S, D>
 where
-    S: Source,
-    D: Destination,
+    S: Source + 'static,
+    D: Destination + 'static,
 {
     source: Option<S>,
     destination: Option<D>,
     thread_count: usize,
     config: ReplicationConfig,
     processors: Vec<Box<dyn Processor<S, D>>>,
+    processor_factory: Option<ProcessorFactory<S>>,
 }
 
-impl<S: Source, D: Destination> Default for ReplicationManagerBuilder<S, D> {
+impl<S, D> Default for ReplicationManagerBuilder<S, D>
+where
+    S: Source + 'static,
+    D: Destination + 'static,
+{
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<S: Source, D: Destination> ReplicationManagerBuilder<S, D> {
+impl<S, D> ReplicationManagerBuilder<S, D>
+where
+    S: Source + 'static,
+    D: Destination + 'static,
+{
     pub fn new() -> Self {
         // Default to all available threads
         let available_threads = num_cpus::get();
@@ -37,11 +45,13 @@ impl<S: Source, D: Destination> ReplicationManagerBuilder<S, D> {
             thread_count: available_threads,
             config: ReplicationConfig::default(),
             processors: Vec::new(),
+            processor_factory: None,
         }
     }
 
     pub fn source(mut self, source: S) -> Self {
         self.source = Some(source);
+        self.processor_factory = Some(ProcessorFactory::new());
         self
     }
 
@@ -54,63 +64,59 @@ impl<S: Source, D: Destination> ReplicationManagerBuilder<S, D> {
     // Config
     // ******
 
-    pub fn thread_count<C: Into<usize>>(mut self, count: C) -> Self {
+    pub fn thread_count(mut self, count: impl Into<usize>) -> Self {
         self.thread_count = count.into();
         self
     }
 
-    pub fn strategy<X: Into<ReplicationStrategy>>(mut self, strategy: X) -> Self {
+    pub fn strategy(mut self, strategy: impl Into<ReplicationStrategy>) -> Self {
         self.config.strategy = strategy.into();
         self
     }
 
-    pub fn batch_size<X: Into<u64>>(mut self, size: X) -> Self {
+    pub fn batch_size(mut self, size: impl Into<u64>) -> Self {
         self.config.batch_size = size.into();
         self
     }
 
-    // pub fn bypass_document_validation<B: Into<bool>>(mut self, bypass: B) -> Self {
-    //     self.config.bypass_document_validation = bypass.into();
-    //     self
-    // }
-
+    /// Add a processor for entity type T with default settings (all items)
     pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static>(
-        self,
-        collection_name: impl Into<String>,
-    ) -> Self {
-        let config = ProcessorConfig::default();
-        self.add_processor_with_config::<T>(collection_name, config)
-    }
-
-    pub fn add_processor_with_config<
-        T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static,
-    >(
         mut self,
-        collection_name: impl Into<String>,
-        config: ProcessorConfig,
-    ) -> Self {
-        self.processors
-            .push(Box::new(ModelProcessor::<T>::new(collection_name, config)));
+        entity_name: impl Into<String>,
+    ) -> Self
+    where
+        S::Query: Default,
+    {
+        let factory = self.processor_factory.as_ref()
+            .expect("Cannot add processor before setting source");
+
+        let config = ProcessorConfig::<S::Query>::default();
+        let processor = factory.create_model_processor::<T>(entity_name, config);
+
+        self.processors.push(Box::new(processor));
         self
     }
 
-    // pub fn add_replicator(self, collection_name: impl Into<String>) -> Self {
-    //     let config = ProcessorConfig::default();
-    //     self.add_replicator_with_config(collection_name.into(), config)
-    // }
-    //
-    // pub fn add_replicator_with_config(
-    //     mut self,
-    //     collection_name: impl Into<String>,
-    //     config: ProcessorConfig,
-    // ) -> Self {
-    //     self.processors
-    //         .push(Box::new(ReplicatorProcessor::<Document>::new(
-    //             config,
-    //             collection_name.into(),
-    //         )));
-    //     self
-    // }
+    /// Add a processor with a custom configuration
+    pub fn add_processor_with_config<T>(
+        mut self,
+        entity_name: impl Into<String>,
+        config: ProcessorConfig<S::Query>,
+    ) -> Self
+    where
+        T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static,
+        S::Query: Default,
+    {
+        let factory = self
+            .processor_factory
+            .as_ref()
+            .expect("Cannot add processor before setting source");
+
+        let processor = factory.create_model_processor::<T>(entity_name, config);
+
+        self.processors.push(Box::new(processor));
+        self
+    }
 
     pub async fn build(self) -> TuxedoResult<ReplicationManager<S, D>> {
         let dbs = Arc::new(DatabasePair::new(
@@ -118,8 +124,8 @@ impl<S: Source, D: Destination> ReplicationManagerBuilder<S, D> {
             self.destination.ok_or(TuxedoError::ConfigError("No destination database provided".into()))?,
         ));
 
-        // Ensure our database connections are actually valid and we can make the connection
-        // We intentionally want to blow up here if we can't connect to *either* DB to avoid a giant mess
+        // Ensure our database connections are actually valid, and we can make the connection
+        // We intentionally want to panic here if we can't connect to *either* DB to avoid a giant mess
         dbs.source
             .test_database_connection()
             .await
