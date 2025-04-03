@@ -1,16 +1,15 @@
 use crate::database::{
-    index::{IndexConfig, IndexDirection, IndexField, IndexType, SourceIndexes},
+    index::{IndexField, SourceIndexes},
     mongodb::source_builder::MongodbSourceBuilder,
     pagination::PaginationOptions,
     traits::{ConnectionTestable, ReadOperations, Source, SourceIndexManager},
 };
 use crate::TuxedoResult;
-use bson::Bson;
+use async_trait::async_trait;
 use futures_util::TryStreamExt;
 use mongodb::{bson::Document, options::{CountOptions, FindOptions}, Client, Database, IndexModel};
 use serde::de::DeserializeOwned;
 use std::collections::HashMap;
-use async_trait::async_trait;
 
 pub struct MongodbSource {
     client: Client,
@@ -70,80 +69,32 @@ impl ConnectionTestable for MongodbSource {
 
 #[async_trait]
 impl SourceIndexManager for MongodbSource {
-    async fn list_indexes(&self, entity_name: &str) -> TuxedoResult<SourceIndexes> {
+    async fn list_indexes(&self, collection_name: &str) -> TuxedoResult<SourceIndexes> {
         let source_indexes: Vec<IndexModel> = self
             .db
-            .collection::<Document>(entity_name)
+            .collection::<Document>(collection_name)
             .list_indexes()
             .await?
             .try_collect()
             .await?;
 
-        let indexes: Vec<IndexConfig> = source_indexes
+        // Grab all indexes except the _id index (created by default by MongoDB)
+        let filtered_models: Vec<IndexModel> = source_indexes
             .into_iter()
-            // Skip the _id index as it's created automatically
             .filter(|index| index.keys.get("_id").is_none())
-            .map(|index| {
-                let keys = &index.keys;
-
-                let fields: Vec<IndexField> = keys.iter()
-                    .map(|(name, value)| {
-                        let direction = match value {
-                            Bson::Int32(1) => IndexDirection::Ascending,
-                            Bson::Int32(-1) => IndexDirection::Descending,
-                            _ => IndexDirection::Ascending, // Default fallback
-                        };
-
-                        IndexField {
-                            name: name.into(),
-                            direction,
-                        }
-                    })
-                    .collect();
-
-                // Default to Standard if no options
-                let mut index_type = IndexType::Standard;
-                let mut options: HashMap<String, serde_json::Value> = HashMap::new();
-
-                if let Some(opts) = &index.options {
-                    // Determine index type
-                    if opts.unique.is_some() {
-                        index_type = IndexType::Unique;
-                        options.insert("unique".into(), serde_json::Value::Bool(true));
-                    } else if opts.text_index_version.is_some() {
-                        index_type = IndexType::Text;
-                    } else if opts.sphere_2d_index_version.is_some() {
-                        index_type = IndexType::Geo2DSphere;
-                    }
-
-                    // Add sparse option if present
-                    if let Some(sparse) = opts.sparse {
-                        options.insert("sparse".into(), serde_json::Value::Bool(sparse));
-                    }
-                }
-
-                let name = index.options
-                    .as_ref()
-                    .and_then(|opts| opts.name.clone())
-                    .unwrap_or_else(|| {
-                        self.generate_default_index_name(&entity_name, &fields)
-                    });
-
-                IndexConfig {
-                    name,
-                    fields,
-                    index_type,
-                    options,
-                }
-            })
             .collect();
 
-        let source_index = SourceIndexes {
-            entity_name: entity_name.into(),
-            indexes,
-        };
+        // Convert to SourceIndexes using the From implementation
+        let mut source_indexes = SourceIndexes::from((filtered_models, collection_name.to_string()));
+        
+        // Replace any unnamed indexes with generated names
+        for index_config in &mut source_indexes.indexes {
+            if index_config.name == "unnamed_index" {
+                index_config.name = self.generate_default_index_name(collection_name, &index_config.fields);
+            }
+        }
 
-        Ok(source_index)
+        Ok(source_indexes)
     }
 }
 

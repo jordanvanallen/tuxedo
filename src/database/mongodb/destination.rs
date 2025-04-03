@@ -1,9 +1,10 @@
-use crate::database::index::IndexConfig;
+use crate::database::index::SourceIndexes;
 use crate::database::mongodb::destination_builder::MongodbDestinationBuilder;
 use crate::database::traits::{ConnectionTestable, Destination, DestinationIndexManager, WriteOperations};
 use crate::TuxedoResult;
 use async_trait::async_trait;
-use mongodb::{options::InsertManyOptions, Client, Database};
+use bson::Document;
+use mongodb::{options::InsertManyOptions, Client, Database, IndexModel};
 use serde::Serialize;
 
 pub struct MongodbDestination {
@@ -47,12 +48,26 @@ impl WriteOperations for MongodbDestination {
 
 #[async_trait]
 impl DestinationIndexManager for MongodbDestination {
-    async fn create_index(&self, config: &IndexConfig) -> TuxedoResult<()> {
-        todo!()
+    async fn create_indexes(&self, source_indexes: SourceIndexes) -> TuxedoResult<()> {
+        let index_models: Vec<IndexModel> = Vec::from(source_indexes.clone());
+
+        if !index_models.is_empty() {
+            self.db
+                .collection::<Document>(&source_indexes.entity_name)
+                .create_indexes(index_models)
+                .await?;
+        }
+
+        Ok(())
     }
 
-    async fn drop_index(&self, index_name: &str) -> TuxedoResult<()> {
-        todo!()
+    async fn drop_index(&self, collection_name: &str, index_name: &str) -> TuxedoResult<()> {
+        self
+            .db
+            .collection::<Document>(collection_name)
+            .drop_index(index_name)
+            .await?;
+        Ok(())
     }
 }
 

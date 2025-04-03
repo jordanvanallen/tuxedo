@@ -1,4 +1,4 @@
-mod mongodb;
+pub mod mongodb;
 pub(crate) mod pair;
 mod postgres;
 pub(crate) mod traits;

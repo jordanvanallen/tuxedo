@@ -145,7 +145,7 @@ where
             .await
             .expect("Expected to successfully drop destination database tables/collections before replication");
 
-        let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count);
+        let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count * 4);
 
         let task_manager = ReplicationManager {
             dbs,

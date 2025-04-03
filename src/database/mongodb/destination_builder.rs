@@ -15,17 +15,17 @@ impl MongodbDestinationBuilder {
         Self::default()
     }
 
-    pub fn database_name(&mut self, database_name: &str) -> &mut Self {
+    pub fn database_name(mut self, database_name: &str) -> Self {
         self.database_name = Some(database_name.to_string());
         self
     }
 
-    pub fn client_options(&mut self, client_options: impl Into<ClientOptions>) -> &mut Self {
+    pub fn client_options(mut self, client_options: impl Into<ClientOptions>) -> Self {
         self.client_options = Some(client_options.into());
         self
     }
 
-    pub fn write_options(&mut self, write_options: impl Into<InsertManyOptions>) -> &mut Self {
+    pub fn write_options(mut self, write_options: impl Into<InsertManyOptions>) -> Self {
         self.write_options = Some(write_options.into());
         self
     }
