@@ -1,7 +1,7 @@
 use super::manager::{ReplicationConfig, ReplicationManager};
 use super::processor::{Processor, ProcessorConfig, ProcessorFactory};
+use super::types::{ReplicationStrategy, StreamingMode};
 use crate::database::{traits::{Destination, Source}, DatabasePair};
-use crate::replication::types::ReplicationStrategy;
 use crate::{Mask, TuxedoError, TuxedoResult};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
@@ -76,6 +76,18 @@ where
 
     pub fn batch_size(mut self, size: impl Into<u64>) -> Self {
         self.config.batch_size = size.into();
+        self
+    }
+
+    /// Set the streaming mode for document processing
+    ///
+    /// - StreamingMode::Batch (default): Processes documents in batches
+    ///   Best for small to medium collections with small documents
+    ///
+    /// - StreamingMode::Streaming: Streams documents to reduce memory usage
+    ///   Best for very large collections or documents to reduce memory pressure
+    pub fn streaming_mode(mut self, mode: StreamingMode) -> Self {
+        self.config.streaming_mode = mode;
         self
     }
 

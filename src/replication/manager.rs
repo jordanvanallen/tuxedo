@@ -1,7 +1,7 @@
 use super::{processor::Processor, task::Task};
+use super::types::{ReplicationStrategy, StreamingMode};
 use crate::database::traits::{Destination, Source};
 use crate::database::DatabasePair;
-use crate::replication::types::ReplicationStrategy;
 use crate::TuxedoResult;
 use futures_util::future::join_all;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
@@ -14,6 +14,7 @@ pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
     pub(crate) batch_size: u64,
     pub(crate) strategy: ReplicationStrategy,
+    pub(crate) streaming_mode: StreamingMode,
 }
 
 impl Default for ReplicationConfig {
@@ -22,6 +23,7 @@ impl Default for ReplicationConfig {
             batch_size: 1_000,
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
+            streaming_mode: StreamingMode::default(),
         }
     }
 }

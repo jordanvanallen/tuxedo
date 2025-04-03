@@ -54,6 +54,8 @@ impl MongodbSource {
 #[async_trait]
 impl Source for MongodbSource {
     async fn prepare_database(&self) -> TuxedoResult<()> {
+        // Warm connection pool, the MongoDB driver will 
+        // establish connections up to min_pool_size
         self.client.warm_connection_pool().await;
         Ok(())
     }

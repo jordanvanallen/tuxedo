@@ -32,7 +32,6 @@ impl WriteOperations for MongodbDestination {
         &self,
         collection_name: &str,
         records: &Vec<T>,
-        // options: impl Into<Option<Self::WriteOptions>>,
     ) -> TuxedoResult<()>
     where
         T: Serialize + Send + Sync,
@@ -82,6 +81,8 @@ impl ConnectionTestable for MongodbDestination {
 #[async_trait]
 impl Destination for MongodbDestination {
     async fn prepare_database(&self) -> TuxedoResult<()> {
+        // Warm connection pool, the MongoDB driver will 
+        // establish connections up to min_pool_size
         self.client.warm_connection_pool().await;
         Ok(())
     }
