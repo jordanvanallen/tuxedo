@@ -14,6 +14,8 @@ pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
     pub(crate) strategy: ReplicationStrategy,
     pub(crate) streaming_mode: StreamingMode,
+    pub(crate) adaptive_batch_sizing: bool,
+    pub(crate) target_batch_bytes: Option<u64>,
 }
 
 impl Default for ReplicationConfig {
@@ -22,6 +24,8 @@ impl Default for ReplicationConfig {
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
             streaming_mode: StreamingMode::default(),
+            adaptive_batch_sizing: false,
+            target_batch_bytes: None,
         }
     }
 }

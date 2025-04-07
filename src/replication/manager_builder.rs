@@ -89,6 +89,24 @@ where
         self
     }
 
+    /// Enable adaptive batch sizing for all processors
+    ///
+    /// This analyzes each collection's document size and automatically adjusts 
+    /// batch sizes for optimal performance.
+    pub fn with_adaptive_batch_sizing(mut self) -> Self {
+        self.config.adaptive_batch_sizing = true;
+        self
+    }
+    
+    /// Set the target batch size in bytes for adaptive sizing
+    ///
+    /// Default is 8MB if not specified. This is the approximate size
+    /// that each batch will target when using adaptive batch sizing.
+    pub fn with_target_batch_bytes(mut self, bytes: u64) -> Self {
+        self.config.target_batch_bytes = Some(bytes);
+        self
+    }
+
     /// Add a processor for entity type T with default settings (all items)
     pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static>(
         mut self,

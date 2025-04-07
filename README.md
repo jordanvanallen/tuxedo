@@ -53,6 +53,63 @@ async fn main() -> TuxedoResult<()> {
 }
 ```
 
+### Performance Optimizations
+
+For better performance with varying document sizes, you can use adaptive batch sizing:
+
+```rust
+let replication_manager = ReplicationManagerBuilder::new()
+    .source_uri("mongodb://localhost:27017")
+    .target_uri("mongodb://localhost:27016")
+    .source_db("source_db_name")
+    .target_db("target_db_name")
+    .strategy(ReplicationStrategy::Mask)
+    // Enable adaptive batch sizing for all collections
+    .with_adaptive_batch_sizing()
+    // Optionally override the automatically calculated target batch size
+    .with_target_batch_bytes(4 * 1024 * 1024) // 4MB batches
+    .add_processor::<User>("users")
+    .add_processor::<LargeDocument>("large_documents")
+    .build()
+    .await?;
+```
+
+When adaptive batch sizing is enabled without an explicit target size, Tuxedo will:
+
+1. Sample documents to determine average document size for each collection
+2. Automatically choose optimal batch size targets based on document size:
+   - Tiny documents (<1KB): 12MB batch size
+   - Small documents (1KB-10KB): 8MB batch size
+   - Medium documents (10KB-100KB): 4MB batch size
+   - Large documents (100KB-500KB): 2MB batch size
+   - Very large documents (>500KB): 1MB batch size
+3. Calculate the optimal number of documents per batch
+4. Apply reasonable limits (between 100-10000 documents)
+
+This ensures that collections with very different document sizes are processed efficiently. For example, a collection with tiny documents might process 10,000 documents per batch, while a collection with large 600KB documents might only process 100 documents per batch.
+
+You can also set adaptive batch sizing on individual processors:
+
+```rust
+// For individual processor configuration
+let user_config = ProcessorConfigBuilder::default()
+    .adaptive_batch_size(true)
+    .target_batch_bytes(Some(2 * 1024 * 1024)) // 2MB batch size for users
+    .build();
+
+let large_doc_config = ProcessorConfigBuilder::default()
+    .adaptive_batch_size(true)
+    .target_batch_bytes(Some(10 * 1024 * 1024)) // 10MB batch size for large docs
+    .build();
+
+let replication_manager = ReplicationManagerBuilder::new()
+    // ... other settings ...
+    .add_processor_with_config::<User>("users", user_config)
+    .add_processor_with_config::<LargeDocument>("large_documents", large_doc_config)
+    .build()
+    .await?;
+```
+
 ### Processors
 
 Processors are used for collections that need to be masked.
