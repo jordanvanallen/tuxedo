@@ -7,7 +7,6 @@ use crate::database::{
 use crate::Mask;
 use async_trait::async_trait;
 use indicatif::ProgressBar;
-use mongodb::{bson::Document, options::FindOptions};
 use rayon::prelude::*;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
@@ -113,7 +112,9 @@ where
         if let Err(e) = self
             .dbs
             .destination
-            .write::<T>(&self.entity_name, &records).await {
+            .write::<T>(&self.entity_name, &records)
+            .await
+        {
             println!(
                 "Failed to insert {} records into collection: `{}`. Records were retrieved using query: {} and PaginationOptions: {:?}. Encountered error: {e}",
                 records.len(),
@@ -125,34 +126,5 @@ where
         }
 
         self.update_progress_bar(&self.progress_bar, records.len());
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct QueryConfig<Q> {
-    pub(crate) query: Q,
-    pub(crate) skip: usize,
-    pub(crate) limit: usize,
-    pub(crate) batch_size: usize,
-}
-
-impl<Q> QueryConfig<Q> {
-    pub(crate) fn new(query: Q, skip: usize, limit: usize, batch_size: usize) -> Self {
-        Self {
-            query,
-            skip,
-            limit,
-            batch_size,
-        }
-    }
-}
-
-impl QueryConfig<Document> {
-    pub(crate) fn mongo_find_options(&self) -> FindOptions {
-        FindOptions::builder()
-            .limit(self.limit as i64)
-            .skip(self.skip as u64)
-            .batch_size(self.batch_size as u32)
-            .build()
     }
 }

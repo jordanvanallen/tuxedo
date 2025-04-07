@@ -1,4 +1,4 @@
-use crate::database::mongodb::MongodbSource;
+use crate::database::mongodb::{get_compressors, MongodbSource};
 use crate::{TuxedoError, TuxedoResult};
 use mongodb::options::{ClientOptions, Compressor, CountOptions, FindOptions};
 use mongodb::Client;
@@ -99,15 +99,7 @@ impl MongodbSourceBuilder {
     pub fn enable_compression(mut self) -> Self {
         // Enable all available compressors in order of preference
         // MongoDB will negotiate the best supported algorithm with the server
-        self.compressors = Some(vec![
-            // Zstd offers the best compression ratio and good performance
-            Compressor::Zstd { level: None },
-            // Zlib is widely supported with good compression
-            Compressor::Zlib { level: None },
-            // Snappy is fastest but has lower compression ratio
-            Compressor::Snappy,
-        ]);
-
+        self.compressors = get_compressors();
         self
     }
 
@@ -174,7 +166,7 @@ impl MongodbSourceBuilder {
         let db = client.database(database_name.as_str());
 
         // Apply read options with optimized batch size
-        let mut read_options = self.read_options.unwrap_or_else(|| FindOptions::default());
+        let mut read_options: FindOptions = self.read_options.unwrap_or_default();
 
         // Only set batch size if user hasn't explicitly configured it
         if read_options.batch_size.is_none() {

@@ -1,6 +1,6 @@
-use super::MongodbDestination;
+use super::{get_compressors, MongodbDestination};
 use crate::{TuxedoError, TuxedoResult};
-use mongodb::options::{ClientOptions, InsertManyOptions, Compressor, WriteConcern, Acknowledgment};
+use mongodb::options::{ClientOptions, Compressor, InsertManyOptions};
 use mongodb::Client;
 
 #[derive(Default, Clone)]
@@ -49,15 +49,8 @@ impl MongodbDestinationBuilder {
     pub fn enable_compression(mut self) -> Self {
         // Enable all available compressors in order of preference
         // MongoDB will negotiate the best supported algorithm with the server
-        self.compressors = Some(vec![
-            // Zstd offers the best compression ratio and good performance
-            Compressor::Zstd { level: None },
-            // Zlib is widely supported with good compression
-            Compressor::Zlib { level: None },
-            // Snappy is fastest but has lower compression ratio
-            Compressor::Snappy,
-        ]);
-        
+        self.compressors = get_compressors();
+
         self
     }
 
@@ -66,11 +59,11 @@ impl MongodbDestinationBuilder {
     /// This sets write options for maximum write performance:
     /// - Unordered writes (continue on error)
     /// - Optimized write concern
-    /// 
+    ///
     /// Note: This prioritizes performance over guaranteed durability.
     pub fn high_throughput_writes(mut self) -> Self {
         let mut options = self.write_options.unwrap_or_default();
-        
+
         // Use unordered writes (continue processing on error)
         options.ordered = Some(false);
 
@@ -79,7 +72,7 @@ impl MongodbDestinationBuilder {
         // This is fine because we are assuming the data is already validated
         // in the source database so we don't need to validate it again
         options.bypass_document_validation = Some(true);
-        
+
         self.write_options = Some(options);
         self
     }
@@ -97,26 +90,28 @@ impl MongodbDestinationBuilder {
 
         // Apply high throughput write settings directly
         builder = builder.high_throughput_writes();
-        
+
         // Apply compression settings directly
         if enable_compression {
             builder = builder.enable_compression();
         }
-        
+
         builder
     }
 
     pub async fn build(self) -> TuxedoResult<MongodbDestination> {
-        let database_name = self
-            .database_name
-            .ok_or_else(||
-                TuxedoError::Generic("No database name provided for mongodb destination database".into())
-            )?;
-        
+        let database_name = self.database_name.ok_or_else(|| {
+            TuxedoError::Generic(
+                "No database name provided for mongodb destination database".into(),
+            )
+        })?;
+
         let mut client_options = if let Some(options) = self.client_options {
             options
         } else {
-            return Err(TuxedoError::Generic("No client options provided for mongodb destination database".into()))
+            return Err(TuxedoError::Generic(
+                "No client options provided for mongodb destination database".into(),
+            ));
         };
 
         // Apply smart defaults for connection pool settings if not already specified
@@ -137,10 +132,6 @@ impl MongodbDestinationBuilder {
         let client = Client::with_options(client_options)?;
         let db = client.database(database_name.as_str());
 
-        Ok(MongodbDestination::new(
-            client,
-            db,
-            self.write_options,
-        ))
+        Ok(MongodbDestination::new(client, db, self.write_options))
     }
 }

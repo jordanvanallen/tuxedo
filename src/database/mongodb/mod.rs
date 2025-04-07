@@ -1,5 +1,6 @@
 pub use destination::MongodbDestination;
 pub use destination_builder::MongodbDestinationBuilder;
+use mongodb::options::Compressor;
 pub use source::MongodbSource;
 pub use source_builder::MongodbSourceBuilder;
 
@@ -8,6 +9,21 @@ pub mod destination_builder;
 pub mod source;
 pub mod source_builder;
 pub mod conversions;
+
+/// Available compression algorithms (in recommended order):
+/// - Zstd (best compression ratio)
+/// - Zlib (good balance of speed and compression)
+/// - Snappy (fastest, but less compression)
+pub(crate) fn get_compressors() -> Option<Vec<Compressor>> {
+    Some(vec![
+        // Zstd offers the best compression ratio and good performance
+        Compressor::Zstd { level: None },
+        // Zlib is widely supported with good compression
+        Compressor::Zlib { level: None },
+        // Snappy is fastest but has lower compression ratio
+        Compressor::Snappy,
+    ])
+}
 
 #[cfg(test)]
 mod tests {
@@ -25,13 +41,13 @@ mod tests {
     //! Both directions are tested to ensure bi-directional compatibility.
 
     use crate::database::index::{IndexConfig, IndexDirection, IndexField, IndexType, SourceIndexes};
-    use mongodb::{options::IndexOptions, IndexModel};
-    use std::collections::HashMap;
-    use serde_json;
     use bson;
+    use mongodb::{options::IndexOptions, IndexModel};
+    use serde_json;
+    use std::collections::HashMap;
 
     // Helper functions to make tests more maintainable
-    
+
     /// Creates a standard (non-unique) index configuration for testing
     fn create_standard_index_config(name: &str, field_name: &str) -> IndexConfig {
         IndexConfig {

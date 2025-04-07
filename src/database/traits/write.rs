@@ -8,7 +8,7 @@ pub trait WriteOperations {
     async fn write<T>(
         &self,
         entity_name: &str,
-        records: &Vec<T>,
+        records: &[T],
         // options: impl Into<Option<Self::WriteOptions>>,
     ) -> TuxedoResult<()>
     where

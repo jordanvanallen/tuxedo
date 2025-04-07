@@ -31,7 +31,7 @@ impl WriteOperations for MongodbDestination {
     async fn write<T>(
         &self,
         collection_name: &str,
-        records: &Vec<T>,
+        records: &[T],
     ) -> TuxedoResult<()>
     where
         T: Serialize + Send + Sync,
@@ -47,6 +47,15 @@ impl WriteOperations for MongodbDestination {
 
 #[async_trait]
 impl DestinationIndexManager for MongodbDestination {
+    async fn drop_index(&self, collection_name: &str, index_name: &str) -> TuxedoResult<()> {
+        self
+            .db
+            .collection::<Document>(collection_name)
+            .drop_index(index_name)
+            .await?;
+        Ok(())
+    }
+
     async fn create_indexes(&self, source_indexes: SourceIndexes) -> TuxedoResult<()> {
         let index_models: Vec<IndexModel> = Vec::from(source_indexes.clone());
 
@@ -57,15 +66,6 @@ impl DestinationIndexManager for MongodbDestination {
                 .await?;
         }
 
-        Ok(())
-    }
-
-    async fn drop_index(&self, collection_name: &str, index_name: &str) -> TuxedoResult<()> {
-        self
-            .db
-            .collection::<Document>(collection_name)
-            .drop_index(index_name)
-            .await?;
         Ok(())
     }
 }

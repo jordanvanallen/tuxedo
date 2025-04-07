@@ -97,7 +97,7 @@ where
         self.config.adaptive_batch_sizing = true;
         self
     }
-    
+
     /// Set the target batch size in bytes for adaptive sizing
     ///
     /// Default is 8MB if not specified. This is the approximate size
@@ -181,7 +181,7 @@ where
             .await
             .expect("Expected to successfully drop destination database tables/collections before replication");
 
-        let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count * 4);
+        let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count * 10);
 
         let task_manager = ReplicationManager {
             dbs,

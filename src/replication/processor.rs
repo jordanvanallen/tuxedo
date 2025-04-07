@@ -110,27 +110,27 @@ where
 
         // If adaptive sizing is enabled, analyze this specific collection
         // Use adaptive sizing from self.config first, fall back to default_config
-        let use_adaptive_batch_sizing = self.config.adaptive_batch_size || default_config.adaptive_batch_sizing;
+        let use_adaptive_batch_sizing =
+            self.config.adaptive_batch_size || default_config.adaptive_batch_sizing;
         if use_adaptive_batch_sizing {
             // Sample documents from this specific collection to determine size characteristics
-            let sample = match dbs
+            let sample = dbs
                 .source
                 .read_chunk::<T>(
                     &self.entity_name,
                     self.config.query.clone(),
-                    PaginationOptions { start_position: 0, limit: 20 }, // Small sample for analysis
+                    PaginationOptions {
+                        start_position: 0,
+                        limit: 20,
+                    }, // Small sample for analysis
                 )
-                .await
-            {
-                Ok(docs) => docs,
-                Err(e) => {
-                    println!(
-                        "Could not get sample for batch size analysis: {}. Using default batch size.",
-                        e
-                    );
-                    Vec::new()
-                }
-            };
+                .await.unwrap_or_else(|e| {
+                println!(
+                    "Could not get sample for batch size analysis: {}. Using default batch size.",
+                    e
+                );
+                Vec::new()
+            });
 
             if !sample.is_empty() {
                 // Calculate average document size for this specific collection
@@ -144,33 +144,28 @@ where
                         }
                     })
                     .sum();
-                
+
                 let avg_doc_size = total_size / sample.len();
-                
+
                 // Target batch size in bytes - determine optimally if no explicit setting
-                let target_bytes = if let Some(explicit_target) = self.config.target_batch_bytes
-                    .or(default_config.target_batch_bytes) {
+                let target_bytes = if let Some(explicit_target) = self
+                    .config
+                    .target_batch_bytes
+                    .or(default_config.target_batch_bytes)
+                {
                     // User explicitly set a target, use that
                     explicit_target
                 } else {
                     // Auto-calculate based on document size
                     calculate_optimal_target_bytes(avg_doc_size)
                 };
-                
+
                 // Calculate optimal documents per batch based on size
                 let optimal_count = (target_bytes / avg_doc_size as u64).max(10);
-                
+
                 // Apply reasonable limits
-                let adapted_batch_size = optimal_count.min(10000).max(100);
-                
-                println!(
-                    "Collection '{}': avg doc size={} bytes, optimal target={} MB, batch={} docs",
-                    &self.entity_name,
-                    avg_doc_size,
-                    target_bytes as f64 / (1024.0 * 1024.0),
-                    adapted_batch_size
-                );
-                
+                let adapted_batch_size = optimal_count.clamp(100, 10_000);
+
                 batch_size = adapted_batch_size;
             }
         }
@@ -233,7 +228,7 @@ where
 }
 
 /// Calculates the optimal target batch size in bytes based on average document size
-/// 
+///
 /// This adjusts the target batch size dynamically to optimize for:
 /// - Very small documents: larger batches to reduce network overhead
 /// - Medium documents: balanced batch size
@@ -244,25 +239,25 @@ fn calculate_optimal_target_bytes(avg_doc_size: usize) -> u64 {
     if avg_doc_size < 1024 {
         return 12 * 1024 * 1024; // 12MB for tiny documents
     }
-    
+
     // For small documents (1KB-10KB), use standard batch size
     if avg_doc_size < 10 * 1024 {
         return 8 * 1024 * 1024; // 8MB for small documents
     }
-    
+
     // For medium documents (10KB-100KB), use moderate batch size
     if avg_doc_size < 100 * 1024 {
         return 4 * 1024 * 1024; // 4MB for medium documents
     }
-    
+
     // For large documents (100KB-500KB), use smaller batches
     if avg_doc_size < 500 * 1024 {
         return 2 * 1024 * 1024; // 2MB for large documents
     }
-    
+
     // For very large documents (>500KB), use minimal batches
     // to avoid excessive memory pressure
-    return 1 * 1024 * 1024; // 1MB for very large documents
+    1024 * 1024 // 1MB for very large documents
 }
 
 /// Configures how a processor will handle an entity replication
@@ -279,18 +274,19 @@ pub struct ProcessorConfig<Q> {
 }
 
 impl<Q> ProcessorConfig<Q> {
-    /// Create a new ProcessorConfig with the given query and batch size
-    ///
-    /// Note: This is a convenience method for crate usage.
-    /// External users should use the builder pattern.
-    pub(crate) fn new(query: Q, batch_size: Option<u64>) -> Self {
-        Self {
-            query,
-            batch_size,
-            adaptive_batch_size: false,
-            target_batch_bytes: None,
-        }
-    }
+    // TODO; Remove this if we don't end up needing it
+    // Create a new ProcessorConfig with the given query and batch size
+    //
+    // Note: This is a convenience method for crate usage.
+    // External users should use the builder pattern.
+    // pub(crate) fn new(query: Q, batch_size: Option<u64>) -> Self {
+    //     Self {
+    //         query,
+    //         batch_size,
+    //         adaptive_batch_size: false,
+    //         target_batch_bytes: None,
+    //     }
+    // }
 
     /// Create a builder for ProcessorConfig
     pub fn builder() -> ProcessorConfigBuilder<Q>
@@ -327,13 +323,13 @@ impl<Q: Default> ProcessorConfigBuilder<Q> {
         self.config.batch_size = size.into();
         self
     }
-    
+
     /// Enable or disable adaptive batch sizing
     pub fn adaptive_batch_size(mut self, enabled: bool) -> Self {
         self.config.adaptive_batch_size = enabled;
         self
     }
-    
+
     /// Set the target batch size in bytes for adaptive sizing
     pub fn target_batch_bytes(mut self, bytes: impl Into<Option<u64>>) -> Self {
         self.config.target_batch_bytes = bytes.into();
