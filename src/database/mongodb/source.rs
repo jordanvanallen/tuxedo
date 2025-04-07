@@ -7,15 +7,19 @@ use crate::database::{
 use crate::TuxedoResult;
 use async_trait::async_trait;
 use futures_util::TryStreamExt;
-use mongodb::{bson::Document, options::{CountOptions, FindOptions}, Client, Database, IndexModel};
+use mongodb::{
+    bson::Document,
+    options::{CountOptions, FindOptions},
+    Client, Database, IndexModel,
+};
 use serde::de::DeserializeOwned;
-use std::collections::HashMap;
 
 pub struct MongodbSource {
     client: Client,
     db: Database,
     read_options: FindOptions,
     count_options: Option<CountOptions>,
+    batch_size: u64,
 }
 
 impl MongodbSource {
@@ -28,22 +32,25 @@ impl MongodbSource {
         db: Database,
         read_options: FindOptions,
         count_options: Option<CountOptions>,
-    ) -> TuxedoResult<Self>
-    {
+        batch_size: u64,
+    ) -> TuxedoResult<Self> {
         Ok(Self {
             client,
             db,
             read_options,
             count_options,
+            batch_size,
         })
     }
 
-    pub(crate) fn generate_default_index_name(&self, collection_name: &str, fields: &[IndexField]) -> String {
+    pub(crate) fn generate_default_index_name(
+        &self,
+        collection_name: &str,
+        fields: &[IndexField],
+    ) -> String {
         let field_names: String = fields
             .iter()
-            .map(|field| {
-                format!("{}_{}", field.name, field.direction)
-            })
+            .map(|field| format!("{}_{}", field.name, field.direction))
             .collect::<Vec<String>>()
             .join("_");
 
@@ -54,10 +61,14 @@ impl MongodbSource {
 #[async_trait]
 impl Source for MongodbSource {
     async fn prepare_database(&self) -> TuxedoResult<()> {
-        // Warm connection pool, the MongoDB driver will 
+        // Warm connection pool, the MongoDB driver will
         // establish connections up to min_pool_size
         self.client.warm_connection_pool().await;
         Ok(())
+    }
+
+    fn batch_size(&self) -> u64 {
+        self.batch_size
     }
 }
 
@@ -87,12 +98,14 @@ impl SourceIndexManager for MongodbSource {
             .collect();
 
         // Convert to SourceIndexes using the From implementation
-        let mut source_indexes = SourceIndexes::from((filtered_models, collection_name.to_string()));
-        
+        let mut source_indexes =
+            SourceIndexes::from((filtered_models, collection_name.to_string()));
+
         // Replace any unnamed indexes with generated names
         for index_config in &mut source_indexes.indexes {
             if index_config.name == "unnamed_index" {
-                index_config.name = self.generate_default_index_name(collection_name, &index_config.fields);
+                index_config.name =
+                    self.generate_default_index_name(collection_name, &index_config.fields);
             }
         }
 

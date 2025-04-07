@@ -70,17 +70,11 @@ where
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
     ) {
-        let batch_size = self
-            .config
-            .batch_size
-            .unwrap_or(default_config.batch_size);
+        let batch_size = self.config.batch_size.unwrap_or(dbs.source.batch_size());
 
         let total_records = match dbs
             .source
-            .count_total_records::<T>(
-                &self.entity_name,
-                self.config.query.clone(),
-            )
+            .count_total_records::<T>(&self.entity_name, self.config.query.clone())
             .await
         {
             Ok(num_docs) => num_docs,
@@ -106,7 +100,10 @@ where
 
         if total_records == 0 {
             progress_bar.finish_with_message("No records to process.");
-            println!("No records to process for entity: {}. Skipping.", &self.entity_name);
+            println!(
+                "No records to process for entity: {}. Skipping.",
+                &self.entity_name
+            );
             return;
         }
 
@@ -141,7 +138,10 @@ where
                 dbs,
                 self.entity_name.clone(),
                 query,
-                PaginationOptions { start_position, limit },
+                PaginationOptions {
+                    start_position,
+                    limit,
+                },
                 strategy,
                 progress_bar,
             ));
@@ -176,13 +176,10 @@ pub struct ProcessorConfig<Q> {
 impl<Q> ProcessorConfig<Q> {
     /// Create a new ProcessorConfig with the given query and batch size
     ///
-    /// Note: This is a convenience method for crate usage. 
+    /// Note: This is a convenience method for crate usage.
     /// External users should use the builder pattern.
     pub(crate) fn new(query: Q, batch_size: Option<u64>) -> Self {
-        Self {
-            query,
-            batch_size,
-        }
+        Self { query, batch_size }
     }
 
     /// Create a builder for ProcessorConfig
@@ -379,4 +376,3 @@ where
 //         &self.collection_name
 //     }
 // }
-

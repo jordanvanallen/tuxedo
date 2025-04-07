@@ -1,7 +1,10 @@
 use super::manager::{ReplicationConfig, ReplicationManager};
 use super::processor::{Processor, ProcessorConfig, ProcessorFactory};
 use super::types::{ReplicationStrategy, StreamingMode};
-use crate::database::{traits::{Destination, Source}, DatabasePair};
+use crate::database::{
+    traits::{Destination, Source},
+    DatabasePair,
+};
 use crate::{Mask, TuxedoError, TuxedoResult};
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
@@ -74,11 +77,6 @@ where
         self
     }
 
-    pub fn batch_size(mut self, size: impl Into<u64>) -> Self {
-        self.config.batch_size = size.into();
-        self
-    }
-
     /// Set the streaming mode for document processing
     ///
     /// - StreamingMode::Batch (default): Processes documents in batches
@@ -86,8 +84,8 @@ where
     ///
     /// - StreamingMode::Streaming: Streams documents to reduce memory usage
     ///   Best for very large collections or documents to reduce memory pressure
-    pub fn streaming_mode(mut self, mode: StreamingMode) -> Self {
-        self.config.streaming_mode = mode;
+    pub fn streaming_mode(mut self, mode: impl Into<StreamingMode>) -> Self {
+        self.config.streaming_mode = mode.into();
         self
     }
 
@@ -99,7 +97,9 @@ where
     where
         S::Query: Default,
     {
-        let factory = self.processor_factory.as_ref()
+        let factory = self
+            .processor_factory
+            .as_ref()
             .expect("Cannot add processor before setting source");
 
         let config = ProcessorConfig::<S::Query>::default();
@@ -132,8 +132,12 @@ where
 
     pub async fn build(self) -> TuxedoResult<ReplicationManager<S, D>> {
         let dbs = Arc::new(DatabasePair::new(
-            self.source.ok_or(TuxedoError::ConfigError("No source database provided".into()))?,
-            self.destination.ok_or(TuxedoError::ConfigError("No destination database provided".into()))?,
+            self.source.ok_or(TuxedoError::ConfigError(
+                "No source database provided".into(),
+            ))?,
+            self.destination.ok_or(TuxedoError::ConfigError(
+                "No destination database provided".into(),
+            ))?,
         ));
 
         // Ensure our database connections are actually valid, and we can make the connection
@@ -149,7 +153,9 @@ where
 
         println!("Dropping tables/collections from destination database before beginning...");
         // Collect collection names from processors
-        let collection_names: Vec<String> = self.processors.iter()
+        let collection_names: Vec<String> = self
+            .processors
+            .iter()
             .map(|p| p.entity_name().to_string())
             .collect();
         dbs.destination

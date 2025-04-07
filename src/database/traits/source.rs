@@ -5,11 +5,8 @@ use async_trait::async_trait;
 #[async_trait]
 pub trait Source
 where
-    Self: ReadOperations
-    + SourceIndexManager
-    + ConnectionTestable
-    + Send
-    + Sync,
+    Self: ReadOperations + SourceIndexManager + ConnectionTestable + Send + Sync,
 {
     async fn prepare_database(&self) -> TuxedoResult<()>;
+    fn batch_size(&self) -> u64;
 }

@@ -1,5 +1,5 @@
-use super::{processor::Processor, task::Task};
 use super::types::{ReplicationStrategy, StreamingMode};
+use super::{processor::Processor, task::Task};
 use crate::database::traits::{Destination, Source};
 use crate::database::DatabasePair;
 use crate::TuxedoResult;
@@ -12,7 +12,6 @@ use tokio::{task, task::JoinSet};
 #[derive(Debug, Clone)]
 pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
-    pub(crate) batch_size: u64,
     pub(crate) strategy: ReplicationStrategy,
     pub(crate) streaming_mode: StreamingMode,
 }
@@ -20,7 +19,6 @@ pub(crate) struct ReplicationConfig {
 impl Default for ReplicationConfig {
     fn default() -> Self {
         Self {
-            batch_size: 1_000,
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
             streaming_mode: StreamingMode::default(),
@@ -50,8 +48,8 @@ where
         let progress_style = ProgressStyle::with_template(
             "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
         )
-            .expect("Expected to set progress bar styling")
-            .progress_chars("█▓▒░");
+        .expect("Expected to set progress bar styling")
+        .progress_chars("█▓▒░");
 
         // Spawn processor runners
         let processor_handles: Vec<_> = self
