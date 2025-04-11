@@ -5,9 +5,9 @@ use bson::Document;
 use indicatif::ProgressBar;
 use mongodb::options::{FindOptions, InsertManyOptions};
 use rayon::prelude::*;
+use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
-use serde::{de::DeserializeOwned, Serialize};
 
 #[async_trait]
 pub(crate) trait Task: Send + Sync {
@@ -38,6 +38,7 @@ pub(crate) struct ReplicatorTask<T: Send> {
     collection_name: String,
     query_config: QueryConfig,
     write_config: WriteConfig,
+    masking_lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
     progress_bar: Arc<ProgressBar>,
     _phantom_data: PhantomData<T>,
 }
@@ -48,6 +49,7 @@ impl<T: Send> ReplicatorTask<T> {
         collection_name: impl Into<String>,
         query_config: QueryConfig,
         write_config: WriteConfig,
+        masking_lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
         progress_bar: Arc<ProgressBar>,
     ) -> Self {
         Self {
@@ -55,6 +57,7 @@ impl<T: Send> ReplicatorTask<T> {
             collection_name: collection_name.into(),
             query_config,
             write_config,
+            masking_lambda,
             progress_bar,
             _phantom_data: PhantomData,
         }
@@ -85,11 +88,15 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> ModelTask<T
 #[async_trait]
 impl<T: Send + Sync> Task for ReplicatorTask<T> {
     async fn run(&self) {
-        let records: Vec<Document> = match self.dbs.read_documents(&self.collection_name, &self.query_config).await {
+        let mut records: Vec<Document> = match self
+            .dbs
+            .read_documents(&self.collection_name, &self.query_config)
+            .await
+        {
             Ok(docs) => docs,
-            Err(e) => { 
+            Err(e) => {
                 println!("Failed to retrieve records from collection: `{}` using QueryConfig: {:?}. Encountered error: {}", &self.collection_name, &self.query_config, e);
-                return
+                return;
             }
         };
 
@@ -101,10 +108,20 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
             return;
         }
 
-        if let Err(e) = self.dbs.write::<Document>(&self.collection_name, &self.write_config, &records).await {
+        if let Some(masking_fn) = self.masking_lambda.clone() {
+            records.par_iter_mut().for_each(|record| {
+                (masking_fn)(record);
+            });
+        }
+
+        if let Err(e) = self
+            .dbs
+            .write::<Document>(&self.collection_name, &self.write_config, &records)
+            .await
+        {
             println!(
                 "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",
-                records.len(), 
+                records.len(),
                 &self.collection_name,
                 &self.query_config,
             );
@@ -118,11 +135,15 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
 #[async_trait]
 impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T> {
     async fn run(&self) {
-        let mut records: Vec<T> = match self.dbs.read::<T>(&self.collection_name, &self.query_config).await {
+        let mut records: Vec<T> = match self
+            .dbs
+            .read::<T>(&self.collection_name, &self.query_config)
+            .await
+        {
             Ok(docs) => docs,
-            Err(e) => { 
+            Err(e) => {
                 println!("Failed to retrieve records from collection: `{}` using QueryConfig: {:?}. Encountered error: {e}", &self.collection_name, &self.query_config);
-                return
+                return;
             }
         };
 
@@ -139,12 +160,16 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T>
             ReplicationStrategy::Mask => records.par_iter_mut().for_each(Mask::mask),
         }
 
-        if let Err(e) = self.dbs.write(&self.collection_name, &self.write_config, &records).await {
+        if let Err(e) = self
+            .dbs
+            .write(&self.collection_name, &self.write_config, &records)
+            .await
+        {
             println!(
                 "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",
-                records.len(), 
-                &self.collection_name, 
-                &self.query_config, 
+                records.len(),
+                &self.collection_name,
+                &self.query_config,
             );
             return;
         }
@@ -187,7 +212,9 @@ pub(crate) struct WriteConfig {
 
 impl WriteConfig {
     pub(crate) fn new(bypass_document_validation: bool) -> Self {
-        Self { bypass_document_validation }
+        Self {
+            bypass_document_validation,
+        }
     }
 
     pub(crate) fn insert_many_options(&self) -> InsertManyOptions {

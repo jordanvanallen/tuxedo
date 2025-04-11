@@ -42,13 +42,13 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> ModelProcessor<T> {
 }
 
 pub(crate) struct ReplicatorProcessor<T: Send + Sync> {
-    config: ProcessorConfig,
+    config: ReplicatorConfig,
     collection_name: String,
     _phantom_data: PhantomData<T>,
 }
 
 impl<T: Send + Sync> ReplicatorProcessor<T> {
-    pub(crate) fn new(config: ProcessorConfig, collection_name: String) -> Self {
+    pub(crate) fn new(config: ReplicatorConfig, collection_name: String) -> Self {
         Self {
             config,
             collection_name,
@@ -214,6 +214,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
                 self.collection_name.clone(),
                 QueryConfig::new(query, skip, limit, batch_size),
                 write_config.clone(),
+                self.config.lambda.clone(),
                 progress_bar,
             ));
 
@@ -235,34 +236,26 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
     }
 }
 
+#[derive(Debug, Default)]
 pub struct ProcessorConfig {
     batch_size: Option<usize>,
     query: Document,
 }
 
-impl Default for ProcessorConfig {
-    fn default() -> Self {
-        ProcessorConfigBuilder::new().build()
-    }
-}
-
+#[derive(Debug, Default)]
 pub struct ProcessorConfigBuilder {
     config: ProcessorConfig,
 }
 
-impl Default for ProcessorConfigBuilder {
-    fn default() -> Self {
-        Self::new()
+impl ProcessorConfig {
+    pub fn builder() -> ProcessorConfigBuilder {
+        ProcessorConfigBuilder::new()
     }
 }
 
 impl ProcessorConfigBuilder {
     pub fn new() -> Self {
-        let config = ProcessorConfig {
-            batch_size: None,
-            query: Document::new(),
-        };
-        Self { config }
+        Default::default()
     }
 
     pub fn batch_size<S: Into<Option<usize>>>(mut self, size: S) -> Self {
@@ -277,5 +270,65 @@ impl ProcessorConfigBuilder {
 
     pub fn build(self) -> ProcessorConfig {
         self.config
+    }
+}
+
+#[derive(Default)]
+pub struct ReplicatorConfig {
+    batch_size: Option<usize>,
+    query: Document,
+    lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
+}
+
+impl ReplicatorConfig {
+    fn new(
+        batch_size: Option<usize>,
+        query: Document,
+        lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
+    ) -> Self {
+        Self {
+            batch_size,
+            query,
+            lambda,
+        }
+    }
+
+    pub fn builder() -> ReplicationConfigBuilder {
+        ReplicationConfigBuilder::new()
+    }
+}
+
+#[derive(Default)]
+pub struct ReplicationConfigBuilder {
+    batch_size: Option<usize>,
+    query: Document,
+    lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
+}
+
+impl ReplicationConfigBuilder {
+    pub fn new() -> Self {
+        Default::default()
+    }
+
+    pub fn batch_size(mut self, size: impl Into<Option<usize>>) -> Self {
+        self.batch_size = size.into();
+        self
+    }
+
+    pub fn query(mut self, query: impl Into<Document>) -> Self {
+        self.query = query.into();
+        self
+    }
+
+    pub fn mask<F>(mut self, lambda: F) -> Self
+    where
+        F: Fn(&mut Document) + Send + Sync + 'static,
+    {
+        self.lambda = Some(Arc::new(lambda));
+        self
+    }
+
+    pub fn build(self) -> ReplicatorConfig {
+        ReplicatorConfig::new(self.batch_size, self.query, self.lambda)
     }
 }
