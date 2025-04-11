@@ -1,6 +1,6 @@
 use super::{
     manager::ReplicationConfig,
-    task::{ModelTask, QueryConfig, ReplicatorTask, Task, WriteConfig},
+    task::{ModelTask, QueryConfig, ReplicatorTask, Task},
     types::DatabasePair,
 };
 use crate::Mask;
@@ -59,7 +59,7 @@ impl<T: Send + Sync> ReplicatorProcessor<T> {
 
 #[async_trait]
 impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
-    for ModelProcessor<T>
+for ModelProcessor<T>
 {
     async fn run(
         &self,
@@ -104,7 +104,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
 
         let batch_count = total_documents.div_ceil(batch_size);
         let strategy = default_config.strategy;
-        let write_config = WriteConfig::new(default_config.bypass_document_validation);
+        let write_options = default_config.write_options;
 
         for batch_index in 0..batch_count {
             let skip = batch_index * batch_size;
@@ -126,7 +126,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
                 dbs,
                 self.collection_name.clone(),
                 QueryConfig::new(query, skip, limit, batch_size),
-                write_config.clone(),
+                write_options.clone(),
                 strategy,
                 progress_bar,
             ));
@@ -192,7 +192,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
         }
 
         let batch_count = total_documents.div_ceil(batch_size);
-        let write_config = WriteConfig::new(default_config.bypass_document_validation);
+        let write_options = default_config.write_options;
 
         for batch_index in 0..batch_count {
             let skip = batch_index * batch_size;
@@ -213,7 +213,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
                 dbs,
                 self.collection_name.clone(),
                 QueryConfig::new(query, skip, limit, batch_size),
-                write_config.clone(),
+                write_options.clone(),
                 self.config.lambda.clone(),
                 progress_bar,
             ));
@@ -238,6 +238,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
 
 #[derive(Debug, Default)]
 pub struct ProcessorConfig {
+    adaptive_batching: Option<bool>,
     batch_size: Option<usize>,
     query: Document,
 }
@@ -258,13 +259,18 @@ impl ProcessorConfigBuilder {
         Default::default()
     }
 
-    pub fn batch_size<S: Into<Option<usize>>>(mut self, size: S) -> Self {
-        self.config.batch_size = size.into();
+    pub fn batch_size(mut self, size: impl Into<usize>) -> Self {
+        self.config.batch_size = Some(size.into());
         self
     }
 
     pub fn query<Q: Into<Document>>(mut self, query: Q) -> Self {
         self.config.query = query.into();
+        self
+    }
+
+    pub fn adaptive_batching(mut self, enabled: bool) -> Self {
+        self.config.adaptive_batching = Some(enabled);
         self
     }
 
@@ -277,6 +283,7 @@ impl ProcessorConfigBuilder {
 pub struct ReplicatorConfig {
     batch_size: Option<usize>,
     query: Document,
+    adaptive_batching: Option<bool>,
     lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
 }
 
@@ -284,11 +291,13 @@ impl ReplicatorConfig {
     fn new(
         batch_size: Option<usize>,
         query: Document,
+        adaptive_batching: Option<bool>,
         lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
     ) -> Self {
         Self {
             batch_size,
             query,
+            adaptive_batching,
             lambda,
         }
     }
@@ -302,6 +311,7 @@ impl ReplicatorConfig {
 pub struct ReplicationConfigBuilder {
     batch_size: Option<usize>,
     query: Document,
+    adaptive_batching: Option<bool>,
     lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
 }
 
@@ -320,6 +330,11 @@ impl ReplicationConfigBuilder {
         self
     }
 
+    pub fn adaptive_batching(mut self, enabled: impl Into<bool>) -> Self {
+        self.adaptive_batching = Some(enabled.into());
+        self
+    }
+
     pub fn mask<F>(mut self, lambda: F) -> Self
     where
         F: Fn(&mut Document) + Send + Sync + 'static,
@@ -329,6 +344,6 @@ impl ReplicationConfigBuilder {
     }
 
     pub fn build(self) -> ReplicatorConfig {
-        ReplicatorConfig::new(self.batch_size, self.query, self.lambda)
+        ReplicatorConfig::new(self.batch_size, self.query, self.adaptive_batching, self.lambda)
     }
 }

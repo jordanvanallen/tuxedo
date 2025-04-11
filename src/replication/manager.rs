@@ -3,6 +3,7 @@ use crate::replication::types::{DatabasePair, ReplicationStrategy};
 use crate::TuxedoResult;
 use futures_util::future::join_all;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use mongodb::options::InsertManyOptions;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task;
@@ -12,17 +13,25 @@ use tokio::task::JoinSet;
 pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
     pub(crate) batch_size: usize,
+    pub(crate) cursor_batch_size: Option<usize>,
     pub(crate) strategy: ReplicationStrategy,
-    pub(crate) bypass_document_validation: bool,
+    pub(crate) adaptive_batching: bool,
+    pub(crate) target_batch_bytes: Option<u64>,
+    pub(crate) write_options: InsertManyOptions,
 }
 
 impl Default for ReplicationConfig {
     fn default() -> Self {
+        let batch_size = 1_000;
+
         Self {
-            batch_size: 1_000,
+            batch_size,
+            cursor_batch_size: None,
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
-            bypass_document_validation: false,
+            write_options: InsertManyOptions::builder().build(),
+            adaptive_batching: false,
+            target_batch_bytes: None,
         }
     }
 }
@@ -41,8 +50,8 @@ impl ReplicationManager {
         let progress_style = ProgressStyle::with_template(
             "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
         )
-        .expect("Expected to set progress bar styling")
-        .progress_chars("█▓▒░");
+            .expect("Expected to set progress bar styling")
+            .progress_chars("█▓▒░");
 
         // Spawn processor runners
         let processor_handles: Vec<_> = self

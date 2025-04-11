@@ -5,7 +5,7 @@ use crate::replication::types::{DatabasePair, ReplicationStrategy};
 use crate::{Mask, TuxedoError, TuxedoResult};
 use bson::Document;
 use mongodb::{
-    options::{ClientOptions, ReadConcern},
+    options::{ClientOptions, Compressor, InsertManyOptions, ReadConcern},
     Client,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -19,6 +19,7 @@ pub struct ReplicationManagerBuilder {
     target_db: Option<String>,
     thread_count: usize,
     config: ReplicationConfig,
+    compressors: Option<Vec<Compressor>>,
     processors: Vec<Box<dyn Processor>>,
 }
 
@@ -40,6 +41,7 @@ impl ReplicationManagerBuilder {
             target_db: None,
             thread_count: available_threads,
             config: ReplicationConfig::default(),
+            compressors: None,
             processors: Vec::new(),
         }
     }
@@ -83,14 +85,54 @@ impl ReplicationManagerBuilder {
         self
     }
 
-    // pub fn write_options(mut self, options: impl Into<Opion<InsertManyOptions>>) -> Self {
-    //     self.write_options = options.into();
-    //     self
-    // }
-
-    pub fn bypass_document_validation<B: Into<bool>>(mut self, bypass: B) -> Self {
-        self.config.bypass_document_validation = bypass.into();
+    pub fn cursor_batch_size(mut self, size: impl Into<usize>) -> Self {
+        self.config.cursor_batch_size = Some(size.into());
         self
+    }
+
+    pub fn align_cursor_batch_size(mut self) -> Self {
+        self.config.cursor_batch_size = Some((self.config.batch_size as f64 * 1.2) as usize);
+        self
+    }
+
+    pub fn write_options(mut self, options: impl Into<InsertManyOptions>) -> Self {
+        self.config.write_options = options.into();
+        self
+    }
+
+    pub fn add_compression(mut self) -> Self {
+        self.compressors = Some(vec![
+            // Zstd offers the best compression ratio and good performance
+            Compressor::Zstd { level: None },
+            // Zlib is widely supported with good compression
+            Compressor::Zlib { level: None },
+            // Snappy is fastest but has lower compression ratio
+            Compressor::Snappy,
+        ]);
+        self
+    }
+
+    pub fn adaptive_batching(mut self) -> Self {
+        self.config.adaptive_batching = true;
+        self
+    }
+
+    pub fn optimize_for_performance(self, compression: bool) -> Self {
+        let mut builder = self;
+
+        builder.config.write_options.ordered = false.into();
+        builder.config.write_options.bypass_document_validation = true.into();
+
+        if builder.config.cursor_batch_size.is_none() {
+            builder = builder.align_cursor_batch_size();
+        }
+
+        if compression {
+            builder = builder.add_compression();
+        }
+
+
+        builder
     }
 
     pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static>(
