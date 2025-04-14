@@ -1,5 +1,5 @@
 use super::manager::{ReplicationConfig, ReplicationManager};
-use super::processor::{Processor, ProcessorConfig};
+use super::processor::{Processor, ProcessorConfig, ReplicatorConfig};
 use crate::replication::processor::{ModelProcessor, ReplicatorProcessor};
 use crate::replication::types::{DatabasePair, ReplicationStrategy};
 use crate::{Mask, TuxedoError, TuxedoResult};
@@ -83,6 +83,11 @@ impl ReplicationManagerBuilder {
         self
     }
 
+    // pub fn write_options(mut self, options: impl Into<Opion<InsertManyOptions>>) -> Self {
+    //     self.write_options = options.into();
+    //     self
+    // }
+
     pub fn bypass_document_validation<B: Into<bool>>(mut self, bypass: B) -> Self {
         self.config.bypass_document_validation = bypass.into();
         self
@@ -109,14 +114,14 @@ impl ReplicationManagerBuilder {
     }
 
     pub fn add_replicator(self, collection_name: impl Into<String>) -> Self {
-        let config = ProcessorConfig::default();
+        let config = ReplicatorConfig::default();
         self.add_replicator_with_config(collection_name.into(), config)
     }
 
     pub fn add_replicator_with_config(
         mut self,
         collection_name: impl Into<String>,
-        config: ProcessorConfig,
+        config: ReplicatorConfig,
     ) -> Self {
         self.processors
             .push(Box::new(ReplicatorProcessor::<Document>::new(
@@ -171,12 +176,14 @@ impl ReplicationManagerBuilder {
 
         println!("Dropping collections from target database before beginning...");
         // Collect collection names from processors
-        let collection_names: Vec<String> = self.processors.iter()
+        let collection_names: Vec<String> = self
+            .processors
+            .iter()
             .map(|p| p.collection_name().to_string())
             .collect();
-        dbs.clear_target_collections(&collection_names).await.expect(
-            "Expected to successfully drop target database collections before replication",
-        );
+        dbs.clear_target_collections(&collection_names)
+            .await
+            .expect("Expected to successfully drop target database collections before replication");
 
         let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count);
 

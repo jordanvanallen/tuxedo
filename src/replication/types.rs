@@ -102,7 +102,10 @@ impl DatabasePair {
 
     // Database Initialization (testing) functions
 
-    pub(crate) async fn clear_target_collections(&self, collection_names: &[String]) -> TuxedoResult<()> {
+    pub(crate) async fn clear_target_collections(
+        &self,
+        collection_names: &[String],
+    ) -> TuxedoResult<()> {
         let target_collections = self.target.list_collection_names().await?;
 
         println!("******************************");
@@ -112,16 +115,10 @@ impl DatabasePair {
             // 2. Collections in admin database
             // 3. Collections in config database
             // 4. Special system collections
-            if collection_name.starts_with("system.") || 
-               collection_name.starts_with("admin.") ||
-               collection_name.starts_with("config.") ||
-               collection_name.ends_with(".system.roles") ||
-               collection_name.ends_with(".system.users") ||
-               collection_name.ends_with(".system.version") ||
-               collection_name.ends_with(".system.buckets") ||
-               collection_name.ends_with(".system.profile") ||
-               collection_name.ends_with(".system.js") ||
-               collection_name.ends_with(".system.views") {
+            if collection_name.starts_with("system.")
+                || collection_name.starts_with("admin.")
+                || collection_name.starts_with("config.")
+            {
                 println!("Skipping system collection: {}", collection_name);
                 continue;
             }
@@ -134,7 +131,10 @@ impl DatabasePair {
                     .drop()
                     .await?;
             } else {
-                println!("Skipping collection not in processor list: {}", collection_name);
+                println!(
+                    "Skipping collection not in processor list: {}",
+                    collection_name
+                );
             }
         }
         println!("******************************");
@@ -159,6 +159,7 @@ impl DatabasePair {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum ReplicationStrategy {
     Clone,
     Mask,
