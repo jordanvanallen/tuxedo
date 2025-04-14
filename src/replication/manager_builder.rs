@@ -4,6 +4,7 @@ use crate::replication::processor::{ModelProcessor, ReplicatorProcessor};
 use crate::replication::types::{DatabasePair, ReplicationStrategy};
 use crate::{Mask, TuxedoError, TuxedoResult};
 use bson::Document;
+use mongodb::options::FindOptions;
 use mongodb::{
     options::{ClientOptions, Compressor, InsertManyOptions, ReadConcern},
     Client,
@@ -80,23 +81,28 @@ impl ReplicationManagerBuilder {
         self
     }
 
-    pub fn batch_size<S: Into<usize>>(mut self, size: S) -> Self {
+    pub fn batch_size(mut self, size: impl Into<u64>) -> Self {
         self.config.batch_size = size.into();
         self
     }
 
-    pub fn cursor_batch_size(mut self, size: impl Into<usize>) -> Self {
+    pub fn cursor_batch_size(mut self, size: impl Into<u64>) -> Self {
         self.config.cursor_batch_size = Some(size.into());
         self
     }
 
     pub fn align_cursor_batch_size(mut self) -> Self {
-        self.config.cursor_batch_size = Some((self.config.batch_size as f64 * 1.2) as usize);
+        self.config.cursor_batch_size = Some((self.config.batch_size as f64 * 1.2) as u64);
         self
     }
 
     pub fn write_options(mut self, options: impl Into<InsertManyOptions>) -> Self {
         self.config.write_options = options.into();
+        self
+    }
+
+    pub fn read_options(mut self, options: impl Into<FindOptions>) -> Self {
+        self.config.read_options = options.into();
         self
     }
 

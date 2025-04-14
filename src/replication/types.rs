@@ -1,7 +1,7 @@
-use crate::replication::task::{QueryConfig, WriteConfig};
 use crate::TuxedoResult;
 use bson::Document;
 use futures_util::TryStreamExt;
+use mongodb::options::{FindOptions, InsertManyOptions};
 use mongodb::{Database, IndexModel};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -19,13 +19,14 @@ impl DatabasePair {
     pub(crate) async fn read<T: Serialize + DeserializeOwned + Send + Sync>(
         &self,
         collection_name: &str,
-        config: &QueryConfig,
+        query: Document,
+        options: Option<FindOptions>,
     ) -> TuxedoResult<Vec<T>> {
         Ok(self
             .source
             .collection::<T>(collection_name)
-            .find(config.query.clone())
-            .with_options(config.mongo_find_options())
+            .find(query)
+            .with_options(options)
             .await?
             .try_collect()
             .await?)
@@ -34,13 +35,14 @@ impl DatabasePair {
     pub(crate) async fn read_documents(
         &self,
         collection_name: &str,
-        config: &QueryConfig,
+        query: Document,
+        options: Option<FindOptions>,
     ) -> TuxedoResult<Vec<Document>> {
         Ok(self
             .source
             .collection::<Document>(collection_name)
-            .find(config.query.clone())
-            .with_options(config.mongo_find_options())
+            .find(query)
+            .with_options(options)
             .await?
             .try_collect()
             .await?)
@@ -62,13 +64,13 @@ impl DatabasePair {
     pub(crate) async fn write<T: Send + Sync + Serialize>(
         &self,
         collection_name: &str,
-        write_config: &WriteConfig,
-        records: &Vec<T>,
+        records: &[T],
+        options: Option<InsertManyOptions>,
     ) -> TuxedoResult<()> {
         self.target
             .collection::<T>(collection_name)
             .insert_many(records)
-            .with_options(write_config.insert_many_options())
+            .with_options(options)
             .await?;
         Ok(())
     }

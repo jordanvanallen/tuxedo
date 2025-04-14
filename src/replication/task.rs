@@ -21,42 +21,44 @@ pub(crate) trait Task: Send + Sync {
     }
 }
 
-// TODO: impl Into<FindOptions> for the config? Can we somehow make it into a tuple the
-// function will accept with a splat? is that gross?
+#[derive(Debug)]
 pub(crate) struct ModelTask<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> {
     dbs: Arc<DatabasePair>,
     collection_name: String,
-    query_config: QueryConfig,
-    write_config: WriteConfig,
-    strategy: ReplicationStrategy,
+    config: TaskConfig,
     progress_bar: Arc<ProgressBar>,
+    strategy: ReplicationStrategy,
     _phantom_data: PhantomData<T>,
 }
 
 pub(crate) struct ReplicatorTask<T: Send> {
     dbs: Arc<DatabasePair>,
     collection_name: String,
-    query_config: QueryConfig,
-    write_config: WriteConfig,
+    config: TaskConfig,
     masking_lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
     progress_bar: Arc<ProgressBar>,
     _phantom_data: PhantomData<T>,
+}
+
+#[derive(Debug)]
+pub(crate) struct TaskConfig {
+    pub(crate) query: Document,
+    pub(crate) read_options: Option<FindOptions>,
+    pub(crate) write_options: Option<InsertManyOptions>,
 }
 
 impl<T: Send> ReplicatorTask<T> {
     pub(crate) fn new(
         dbs: Arc<DatabasePair>,
         collection_name: impl Into<String>,
-        query_config: QueryConfig,
-        write_config: WriteConfig,
+        config: TaskConfig,
         masking_lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
         progress_bar: Arc<ProgressBar>,
     ) -> Self {
         Self {
             dbs,
             collection_name: collection_name.into(),
-            query_config,
-            write_config,
+            config,
             masking_lambda,
             progress_bar,
             _phantom_data: PhantomData,
@@ -68,16 +70,14 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> ModelTask<T
     pub(crate) fn new(
         dbs: Arc<DatabasePair>,
         collection_name: impl Into<String>,
-        query_config: QueryConfig,
-        write_config: WriteConfig,
+        config: TaskConfig,
         strategy: ReplicationStrategy,
         progress_bar: Arc<ProgressBar>,
     ) -> Self {
         Self {
             dbs,
             collection_name: collection_name.into(),
-            query_config,
-            write_config,
+            config,
             strategy,
             progress_bar,
             _phantom_data: PhantomData,
@@ -90,20 +90,31 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
     async fn run(&self) {
         let mut records: Vec<Document> = match self
             .dbs
-            .read_documents(&self.collection_name, &self.query_config)
+            .read_documents(
+                &self.collection_name,
+                self.config.query.clone(),
+                self.config.read_options.clone(),
+            )
             .await
         {
             Ok(docs) => docs,
             Err(e) => {
-                println!("Failed to retrieve records from collection: `{}` using QueryConfig: {:?}. Encountered error: {}", &self.collection_name, &self.query_config, e);
+                println!(
+                    "Failed to retrieve records from collection: `{}` using Query: {:?} with read options: {:?}. Encountered error: {}",
+                    &self.collection_name,
+                    &self.config.query,
+                    &self.config.read_options,
+                    e
+                );
                 return;
             }
         };
 
         if records.is_empty() {
             println!(
-                "No records found for batch. Skipping insertion. QueryConfig used: {:?}",
-                &self.query_config
+                "No records found for batch. Skipping insertion. Query: {:?} with read options: {:?}",
+                &self.config.query,
+                &self.config.read_options,
             );
             return;
         }
@@ -116,14 +127,20 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
 
         if let Err(e) = self
             .dbs
-            .write::<Document>(&self.collection_name, &self.write_config, &records)
+            .write::<Document>(
+                &self.collection_name,
+                &records,
+                self.config.write_options.clone(),
+            )
             .await
         {
             println!(
-                "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",
+                "Failed to insert {} records into collection: `{}`. Records were retrieved using Query: {:?} with read options: {:?}. Write options were: {:?}. Encountered error: {e}",
                 records.len(),
                 &self.collection_name,
-                &self.query_config,
+                &self.config.query,
+                &self.config.read_options,
+                &self.config.write_options,
             );
             return;
         }
@@ -137,20 +154,31 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T>
     async fn run(&self) {
         let mut records: Vec<T> = match self
             .dbs
-            .read::<T>(&self.collection_name, &self.query_config)
+            .read(
+                &self.collection_name,
+                self.config.query.clone(),
+                self.config.read_options.clone(),
+            )
             .await
         {
             Ok(docs) => docs,
             Err(e) => {
-                println!("Failed to retrieve records from collection: `{}` using QueryConfig: {:?}. Encountered error: {e}", &self.collection_name, &self.query_config);
+                println!(
+                    "Failed to retrieve records from collection: `{}` using Query: {:?} with read options: {:?}. Encountered error: {}",
+                    &self.collection_name,
+                    &self.config.query,
+                    &self.config.read_options,
+                    e
+                );
                 return;
             }
         };
 
         if records.is_empty() {
             println!(
-                "No records found for batch. Skipping insertion. QueryConfig used: {:?}",
-                &self.query_config
+                "No records found for batch. Skipping insertion. Query: {:?} with read options: {:?}",
+                &self.config.query,
+                &self.config.read_options,
             );
             return;
         }
@@ -162,14 +190,20 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T>
 
         if let Err(e) = self
             .dbs
-            .write(&self.collection_name, &self.write_config, &records)
+            .write::<T>(
+                &self.collection_name,
+                &records,
+                self.config.write_options.clone(),
+            )
             .await
         {
             println!(
-                "Failed to insert {} records into collection: `{}`. Records were retrieved using QueryConfig: {:?}. Encountered error: {e}",
+                "Failed to insert {} records into collection: `{}`. Records were retrieved using Query: {:?} with read options: {:?}. Write options were: {:?}. Encountered error: {e}",
                 records.len(),
                 &self.collection_name,
-                &self.query_config,
+                &self.config.query,
+                &self.config.read_options,
+                &self.config.write_options,
             );
             return;
         }
@@ -181,45 +215,14 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T>
 #[derive(Clone, Debug)]
 pub(crate) struct QueryConfig {
     pub(crate) query: Document,
-    pub(crate) skip: usize,
-    pub(crate) limit: usize,
-    pub(crate) batch_size: usize,
+    pub(crate) read_options: Option<FindOptions>,
 }
 
 impl QueryConfig {
-    pub(crate) fn new(query: Document, skip: usize, limit: usize, batch_size: usize) -> Self {
+    pub(crate) fn new(query: Document, read_options: Option<FindOptions>) -> Self {
         Self {
             query,
-            skip,
-            limit,
-            batch_size,
+            read_options,
         }
-    }
-
-    pub(crate) fn mongo_find_options(&self) -> FindOptions {
-        FindOptions::builder()
-            .limit(self.limit as i64)
-            .skip(self.skip as u64)
-            .batch_size(self.batch_size as u32)
-            .build()
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(crate) struct WriteConfig {
-    pub(crate) bypass_document_validation: bool,
-}
-
-impl WriteConfig {
-    pub(crate) fn new(bypass_document_validation: bool) -> Self {
-        Self {
-            bypass_document_validation,
-        }
-    }
-
-    pub(crate) fn insert_many_options(&self) -> InsertManyOptions {
-        InsertManyOptions::builder()
-            .bypass_document_validation(self.bypass_document_validation)
-            .build()
     }
 }

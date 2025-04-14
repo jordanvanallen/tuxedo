@@ -3,10 +3,12 @@ use super::{
     task::{ModelTask, QueryConfig, ReplicatorTask, Task},
     types::DatabasePair,
 };
+use crate::replication::task::TaskConfig;
 use crate::Mask;
 use async_trait::async_trait;
 use bson::Document;
 use indicatif::ProgressBar;
+use mongodb::options::FindOptions;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -68,7 +70,7 @@ for ModelProcessor<T>
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
     ) {
-        let batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
+        let mut batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
         let total_documents: usize = match dbs
             .read_total_documents::<T>(&self.collection_name, self.config.query.clone())
             .await
@@ -83,6 +85,15 @@ for ModelProcessor<T>
             }
         };
 
+        if total_documents == 0 {
+            progress_bar.finish_with_message("No records to process.");
+            println!(
+                "No records to process for collection: {}. Skipping.",
+                &self.collection_name,
+            );
+            return;
+        }
+
         let progress_bar = Arc::new(progress_bar);
         progress_bar.set_length(total_documents as u64);
         progress_bar.set_message(format!(
@@ -94,6 +105,66 @@ for ModelProcessor<T>
                 .expect("Expected to get model name for progress bar")
         ));
 
+        // TODO: Confirm this is the logic we want for adaptive batching
+        if self.config.adaptive_batching == Some(true) || default_config.adaptive_batching {
+            // TODO: Inject read options here for FindOptions
+            let sample: Vec<T> = match dbs
+                .read::<T>(
+                    &self.collection_name,
+                    self.config.query.clone(),
+                    Some(FindOptions::builder()
+                        .skip((total_documents - 20) as u64)
+                        .limit(20)
+                        .build()
+                    ),
+                )
+                .await {
+                Ok(records) => records,
+                Err(e) => {
+                    println!(
+                        "Could not get sample of documents for collection: `{}`. Collection will be skipped. Encountered error: {e}",
+                        &self.collection_name,
+                    );
+                    Vec::new()
+                }
+            };
+
+            if !sample.is_empty() {
+                // Calculate average document size for this collection
+                let total_size = sample
+                    .iter()
+                    .map(|document| {
+                        // Use serde_json to estimate size
+                        match serde_json::to_string(document) {
+                            Ok(json) => json.len(),
+                            Err(_) => 1024, // Fallback size if conversion fails
+                        }
+                    })
+                    .sum();
+
+                let average_document_size: u64 = (total_size / sample.len()) as u64;
+
+                // Target batch size in bytes - try to determine optimally if no explicit setting
+                let target_bytes: u64 = if let Some(target) = self
+                    .config
+                    .target_batch_bytes
+                    .or(default_config.target_batch_bytes)
+                {
+                    target as u64
+                } else {
+                    calculate_optimal_target_bytes(average_document_size)
+                };
+
+                // Calculate optimal documents per batch based on size
+                let optimal_count = (target_bytes / average_document_size as u64).max(10);
+
+                // Apply reasonable limits
+                let adapted_batch_size = optimal_count.clamp(100, 10_000);
+
+                batch_size = adapted_batch_size;
+            }
+        }
+
         if let Err(e) = dbs.copy_indexes(&self.collection_name).await {
             println!(
                 "Error when copying indexes for collection `{}` from source to target - Error: {:?}",
@@ -102,14 +173,14 @@ for ModelProcessor<T>
             )
         }
 
-        let batch_count = total_documents.div_ceil(batch_size);
+        let batch_count = total_documents.div_ceil(batch_size as usize);
         let strategy = default_config.strategy;
         let write_options = default_config.write_options;
 
         for batch_index in 0..batch_count {
-            let skip = batch_index * batch_size;
+            let skip = batch_index * batch_size as usize;
             let remaining_documents = total_documents.saturating_sub(skip);
-            let limit = batch_size.min(remaining_documents);
+            let limit = batch_size.min(remaining_documents as u64);
 
             // This should never happen in theory
             if limit == 0 {
@@ -147,6 +218,36 @@ for ModelProcessor<T>
     fn collection_name(&self) -> &str {
         &self.collection_name
     }
+}
+
+fn calculate_optimal_target_bytes(average_document_size: u64) -> u64 {
+    // For very small documents (<1KB), use larger batches to reduce i/o overhead
+    if average_document_size < 1024 {
+        return to_mb(12);
+    }
+
+    // For small documents (1KB-10KB), use standard batch size
+    if average_document_size < 10 * 1024 {
+        return to_mb(8);
+    }
+
+    // For medium documents (10KB-100KB), use moderate batch size
+    if average_document_size < 100 * 1024 {
+        return to_mb(4);
+    }
+
+    // For large documents (100KB-500KB), use smaller batches
+    if average_document_size < 500 * 1024 {
+        return to_mb(2);
+    }
+
+    // For very large documents (>500KB), use minimal batches
+    // to avoid excessive memory pressure
+    1024 * 1024
+}
+
+fn to_mb(size: u64) -> u64 {
+    size * 1024 * 1024
 }
 
 #[async_trait]
@@ -191,13 +292,13 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
             )
         }
 
-        let batch_count = total_documents.div_ceil(batch_size);
+        let batch_count = total_documents.div_ceil(batch_size as usize) as u64;
         let write_options = default_config.write_options;
 
         for batch_index in 0..batch_count {
             let skip = batch_index * batch_size;
-            let remaining_documents = total_documents.saturating_sub(skip);
-            let limit = batch_size.min(remaining_documents);
+            let remaining_documents = total_documents.saturating_sub(skip as usize);
+            let limit = batch_size.min(remaining_documents as u64);
 
             // This should never happen in theory
             if limit == 0 {
@@ -212,7 +313,10 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
             let task = Box::new(ReplicatorTask::<T>::new(
                 dbs,
                 self.collection_name.clone(),
-                QueryConfig::new(query, skip, limit, batch_size),
+                TaskConfig {
+                    query: self.config.query,
+                },
+                // QueryConfig::new(query, skip, limit, batch_size),
                 write_options.clone(),
                 self.config.lambda.clone(),
                 progress_bar,
@@ -239,7 +343,8 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
 #[derive(Debug, Default)]
 pub struct ProcessorConfig {
     adaptive_batching: Option<bool>,
-    batch_size: Option<usize>,
+    target_batch_bytes: Option<usize>,
+    batch_size: Option<u64>,
     query: Document,
 }
 
@@ -264,6 +369,11 @@ impl ProcessorConfigBuilder {
         self
     }
 
+    pub fn target_batch_bytes(mut self, size: impl Into<Option<usize>>) -> Self {
+        self.config.target_batch_bytes = size.into();
+        self
+    }
+
     pub fn query<Q: Into<Document>>(mut self, query: Q) -> Self {
         self.config.query = query.into();
         self
@@ -281,7 +391,8 @@ impl ProcessorConfigBuilder {
 
 #[derive(Default)]
 pub struct ReplicatorConfig {
-    batch_size: Option<usize>,
+    batch_size: Option<u64>,
+    target_batch_bytes: Option<u64>,
     query: Document,
     adaptive_batching: Option<bool>,
     lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
@@ -290,12 +401,14 @@ pub struct ReplicatorConfig {
 impl ReplicatorConfig {
     fn new(
         batch_size: Option<usize>,
+        target_batch_bytes: Option<usize>,
         query: Document,
         adaptive_batching: Option<bool>,
         lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
     ) -> Self {
         Self {
             batch_size,
+            target_batch_bytes,
             query,
             adaptive_batching,
             lambda,
@@ -309,7 +422,8 @@ impl ReplicatorConfig {
 
 #[derive(Default)]
 pub struct ReplicationConfigBuilder {
-    batch_size: Option<usize>,
+    batch_size: Option<u64>,
+    target_batch_bytes: Option<u64>,
     query: Document,
     adaptive_batching: Option<bool>,
     lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
@@ -320,8 +434,13 @@ impl ReplicationConfigBuilder {
         Default::default()
     }
 
-    pub fn batch_size(mut self, size: impl Into<Option<usize>>) -> Self {
+    pub fn batch_size(mut self, size: impl Into<Option<u64>>) -> Self {
         self.batch_size = size.into();
+        self
+    }
+
+    pub fn target_batch_bytes(mut self, size: impl Into<Option<u64>>) -> Self {
+        self.target_batch_bytes = size.into();
         self
     }
 

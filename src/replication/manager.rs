@@ -3,7 +3,7 @@ use crate::replication::types::{DatabasePair, ReplicationStrategy};
 use crate::TuxedoResult;
 use futures_util::future::join_all;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
-use mongodb::options::InsertManyOptions;
+use mongodb::options::{FindOptions, InsertManyOptions};
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::task;
@@ -12,12 +12,13 @@ use tokio::task::JoinSet;
 #[derive(Debug, Clone)]
 pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
-    pub(crate) batch_size: usize,
-    pub(crate) cursor_batch_size: Option<usize>,
+    pub(crate) batch_size: u64,
+    pub(crate) cursor_batch_size: Option<u64>,
     pub(crate) strategy: ReplicationStrategy,
     pub(crate) adaptive_batching: bool,
-    pub(crate) target_batch_bytes: Option<u64>,
+    pub(crate) target_batch_bytes: Option<usize>,
     pub(crate) write_options: InsertManyOptions,
+    pub(crate) read_options: FindOptions,
 }
 
 impl Default for ReplicationConfig {
@@ -29,7 +30,8 @@ impl Default for ReplicationConfig {
             cursor_batch_size: None,
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
-            write_options: InsertManyOptions::builder().build(),
+            write_options: Default::default(),
+            read_options: Default::default(),
             adaptive_batching: false,
             target_batch_bytes: None,
         }
