@@ -1,6 +1,6 @@
 [package]
 name = "tuxedo"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2021"
 authors = ["Jordan Van Allen <jordanvanallen@gmail.com>"]
 description = "A parallel masking library for MongoDB"
