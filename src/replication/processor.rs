@@ -1,14 +1,13 @@
 use super::{
     manager::ReplicationConfig,
-    task::{ModelTask, QueryConfig, ReplicatorTask, Task},
+    task::{ModelTask, ReplicatorTask, Task},
     types::DatabasePair,
 };
 use crate::replication::task::TaskConfig;
-use crate::Mask;
+use crate::{Mask, TuxedoResult};
 use async_trait::async_trait;
 use bson::Document;
 use indicatif::ProgressBar;
-use mongodb::options::FindOptions;
 use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
@@ -23,6 +22,47 @@ pub(crate) trait Processor: Send + Sync {
         default_config: ReplicationConfig,
         progress_bar: ProgressBar,
     );
+
+    async fn get_total_documents(&self, dbs: &Arc<DatabasePair>, query: Document) -> TuxedoResult<usize> {
+        match dbs.read_total_documents::<Document>(self.collection_name(), query).await {
+            Ok(total_documents) => Ok(total_documents),
+            Err(e) => {
+                println!(
+                    "Could not get total number of documents for collection: `{}`. Collection will be skipped. Encountered error: {e}",
+                    self.collection_name(),
+                );
+                Err(e)
+            }
+        }
+    }
+
+    fn setup_progress_bar(
+        &self,
+        progress_bar: ProgressBar,
+        total_documents: usize,
+        entity_name: &str,
+    ) -> Arc<ProgressBar> {
+        let progress_bar = Arc::new(progress_bar);
+
+        progress_bar.set_length(total_documents as u64);
+        progress_bar.set_message(format!(
+            "{} ({})",
+            self.collection_name(),
+            entity_name,
+        ));
+
+        progress_bar
+    }
+
+    async fn copy_indexes(&self, dbs: &Arc<DatabasePair>) {
+        if let Err(e) = dbs.copy_indexes(self.collection_name()).await {
+            println!(
+                "Error when copying indexes for collection `{}` from source to target - Error: {:?}",
+                self.collection_name(),
+                e
+            )
+        }
+    }
 
     fn collection_name(&self) -> &str;
 }
@@ -71,19 +111,22 @@ for ModelProcessor<T>
         progress_bar: ProgressBar,
     ) {
         let mut batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
-        let total_documents: usize = match dbs
-            .read_total_documents::<T>(&self.collection_name, self.config.query.clone())
-            .await
-        {
-            Ok(num_docs) => num_docs,
-            Err(e) => {
-                println!(
-                    "Could not get total number of documents for collection: `{}`. Collection will be skipped. Encountered error: {e}",
-                    &self.collection_name,
-                );
-                return;
-            }
+        let total_documents = match self.get_total_documents(
+            &dbs,
+            self.config.query.clone(),
+        ).await {
+            Ok(total_documents) => total_documents,
+            Err(_) => return,
         };
+
+        let progress_bar = self.setup_progress_bar(
+            progress_bar,
+            total_documents,
+            std::any::type_name::<T>()
+                .split("::")
+                .last()
+                .expect("Expected to get model name for progress bar"),
+        );
 
         if total_documents == 0 {
             progress_bar.finish_with_message("No records to process.");
@@ -94,29 +137,17 @@ for ModelProcessor<T>
             return;
         }
 
-        let progress_bar = Arc::new(progress_bar);
-        progress_bar.set_length(total_documents as u64);
-        progress_bar.set_message(format!(
-            "{} ({})",
-            &self.collection_name,
-            std::any::type_name::<T>()
-                .split("::")
-                .last()
-                .expect("Expected to get model name for progress bar")
-        ));
-
         // TODO: Confirm this is the logic we want for adaptive batching
         if self.config.adaptive_batching == Some(true) || default_config.adaptive_batching {
             // TODO: Inject read options here for FindOptions
+            let mut read_options = default_config.read_options.clone();
+            read_options.skip = Some((total_documents - 20) as u64);
+            read_options.limit = 20.into();
             let sample: Vec<T> = match dbs
                 .read::<T>(
                     &self.collection_name,
                     self.config.query.clone(),
-                    Some(FindOptions::builder()
-                        .skip((total_documents - 20) as u64)
-                        .limit(20)
-                        .build()
-                    ),
+                    read_options.into(),
                 )
                 .await {
                 Ok(records) => records,
@@ -130,8 +161,8 @@ for ModelProcessor<T>
             };
 
             if !sample.is_empty() {
-                // Calculate average document size for this collection
-                let total_size = sample
+                // Calculate the average document size for this collection
+                let total_size: u64 = sample
                     .iter()
                     .map(|document| {
                         // Use serde_json to estimate size
@@ -140,9 +171,9 @@ for ModelProcessor<T>
                             Err(_) => 1024, // Fallback size if conversion fails
                         }
                     })
-                    .sum();
+                    .sum::<usize>() as u64;
 
-                let average_document_size: u64 = (total_size / sample.len()) as u64;
+                let average_document_size: u64 = total_size / sample.len() as u64;
 
                 // Target batch size in bytes - try to determine optimally if no explicit setting
                 let target_bytes: u64 = if let Some(target) = self
@@ -162,16 +193,11 @@ for ModelProcessor<T>
                 let adapted_batch_size = optimal_count.clamp(100, 10_000);
 
                 batch_size = adapted_batch_size;
+                // TODO: Set cursor batch size
             }
         }
 
-        if let Err(e) = dbs.copy_indexes(&self.collection_name).await {
-            println!(
-                "Error when copying indexes for collection `{}` from source to target - Error: {:?}",
-                &self.collection_name,
-                e
-            )
-        }
+        self.copy_indexes(&dbs).await;
 
         let batch_count = total_documents.div_ceil(batch_size as usize);
         let strategy = default_config.strategy;
@@ -180,7 +206,7 @@ for ModelProcessor<T>
         for batch_index in 0..batch_count {
             let skip = batch_index * batch_size as usize;
             let remaining_documents = total_documents.saturating_sub(skip);
-            let limit = batch_size.min(remaining_documents as u64);
+            let limit = batch_size.min(remaining_documents as u64) as i64;
 
             // This should never happen in theory
             if limit == 0 {
@@ -193,11 +219,18 @@ for ModelProcessor<T>
             let strategy = strategy.clone();
             let progress_bar = Arc::clone(&progress_bar);
 
+            let mut read_options = default_config.read_options.clone();
+            read_options.skip = (skip as u64).into();
+            read_options.limit = limit.into();
+
             let task = Box::new(ModelTask::<T>::new(
                 dbs,
                 self.collection_name.clone(),
-                QueryConfig::new(query, skip, limit, batch_size),
-                write_options.clone(),
+                TaskConfig {
+                    query,
+                    read_options,
+                    write_options: write_options.clone(),
+                },
                 strategy,
                 progress_bar,
             ));
@@ -260,7 +293,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
         progress_bar: ProgressBar,
     ) {
         let batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
-        let total_documents: usize = match dbs
+        let total_documents = match dbs
             .read_total_documents::<T>(&self.collection_name, self.config.query.clone())
             .await
         {
@@ -273,32 +306,30 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
                 return;
             }
         };
-        let progress_bar = Arc::new(progress_bar);
-        progress_bar.set_length(total_documents as u64);
-        progress_bar.set_message(format!(
-            "{} ({})",
-            &self.collection_name,
-            std::any::type_name::<T>()
-                .split("::")
-                .last()
-                .expect("Expected to get model name for progress bar")
-        ));
+        let progress_bar = self.setup_progress_bar(
+            progress_bar,
+            total_documents,
+            "Document",
+        );
 
-        if let Err(e) = dbs.copy_indexes(&self.collection_name).await {
+        if total_documents == 0 {
+            progress_bar.finish_with_message("No records to process.");
             println!(
-                "Error when copying indexes for collection `{}` from source to target - Error: {:?}",
+                "No records to process for collection: {}. Skipping.",
                 &self.collection_name,
-                e
-            )
+            );
+            return;
         }
 
-        let batch_count = total_documents.div_ceil(batch_size as usize) as u64;
+        self.copy_indexes(&dbs).await;
+
+        let batch_count = total_documents.div_ceil(batch_size as usize);
         let write_options = default_config.write_options;
 
         for batch_index in 0..batch_count {
-            let skip = batch_index * batch_size;
-            let remaining_documents = total_documents.saturating_sub(skip as usize);
-            let limit = batch_size.min(remaining_documents as u64);
+            let skip = batch_index * batch_size as usize;
+            let remaining_documents = total_documents.saturating_sub(skip);
+            let limit = batch_size.min(remaining_documents as u64) as i64;
 
             // This should never happen in theory
             if limit == 0 {
@@ -310,14 +341,19 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
             let query = self.config.query.clone();
             let progress_bar = Arc::clone(&progress_bar);
 
+            let mut read_options = default_config.read_options.clone();
+            read_options.skip = (skip as u64).into();
+            read_options.limit = limit.into();
+
             let task = Box::new(ReplicatorTask::<T>::new(
                 dbs,
                 self.collection_name.clone(),
                 TaskConfig {
-                    query: self.config.query,
+                    query,
+                    read_options,
+                    write_options: write_options.clone(),
                 },
                 // QueryConfig::new(query, skip, limit, batch_size),
-                write_options.clone(),
                 self.config.lambda.clone(),
                 progress_bar,
             ));
@@ -364,7 +400,7 @@ impl ProcessorConfigBuilder {
         Default::default()
     }
 
-    pub fn batch_size(mut self, size: impl Into<usize>) -> Self {
+    pub fn batch_size(mut self, size: impl Into<u64>) -> Self {
         self.config.batch_size = Some(size.into());
         self
     }
@@ -400,8 +436,8 @@ pub struct ReplicatorConfig {
 
 impl ReplicatorConfig {
     fn new(
-        batch_size: Option<usize>,
-        target_batch_bytes: Option<usize>,
+        batch_size: Option<u64>,
+        target_batch_bytes: Option<u64>,
         query: Document,
         adaptive_batching: Option<bool>,
         lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
@@ -463,6 +499,12 @@ impl ReplicationConfigBuilder {
     }
 
     pub fn build(self) -> ReplicatorConfig {
-        ReplicatorConfig::new(self.batch_size, self.query, self.adaptive_batching, self.lambda)
+        ReplicatorConfig::new(
+            self.batch_size,
+            self.target_batch_bytes,
+            self.query,
+            self.adaptive_batching,
+            self.lambda,
+        )
     }
 }

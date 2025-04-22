@@ -43,27 +43,8 @@ pub(crate) struct ReplicatorTask<T: Send> {
 #[derive(Debug)]
 pub(crate) struct TaskConfig {
     pub(crate) query: Document,
-    pub(crate) read_options: Option<FindOptions>,
-    pub(crate) write_options: Option<InsertManyOptions>,
-}
-
-impl<T: Send> ReplicatorTask<T> {
-    pub(crate) fn new(
-        dbs: Arc<DatabasePair>,
-        collection_name: impl Into<String>,
-        config: TaskConfig,
-        masking_lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
-        progress_bar: Arc<ProgressBar>,
-    ) -> Self {
-        Self {
-            dbs,
-            collection_name: collection_name.into(),
-            config,
-            masking_lambda,
-            progress_bar,
-            _phantom_data: PhantomData,
-        }
-    }
+    pub(crate) read_options: FindOptions,
+    pub(crate) write_options: InsertManyOptions,
 }
 
 impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> ModelTask<T> {
@@ -85,15 +66,34 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> ModelTask<T
     }
 }
 
+impl<T: Send> ReplicatorTask<T> {
+    pub(crate) fn new(
+        dbs: Arc<DatabasePair>,
+        collection_name: impl Into<String>,
+        config: TaskConfig,
+        masking_lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
+        progress_bar: Arc<ProgressBar>,
+    ) -> Self {
+        Self {
+            dbs,
+            collection_name: collection_name.into(),
+            config,
+            masking_lambda,
+            progress_bar,
+            _phantom_data: PhantomData,
+        }
+    }
+}
+
 #[async_trait]
 impl<T: Send + Sync> Task for ReplicatorTask<T> {
     async fn run(&self) {
         let mut records: Vec<Document> = match self
             .dbs
-            .read_documents(
+            .read(
                 &self.collection_name,
                 self.config.query.clone(),
-                self.config.read_options.clone(),
+                self.config.read_options.clone().into(),
             )
             .await
         {
@@ -130,7 +130,7 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
             .write::<Document>(
                 &self.collection_name,
                 &records,
-                self.config.write_options.clone(),
+                self.config.write_options.clone().into(),
             )
             .await
         {
@@ -157,7 +157,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T>
             .read(
                 &self.collection_name,
                 self.config.query.clone(),
-                self.config.read_options.clone(),
+                self.config.read_options.clone().into(),
             )
             .await
         {
@@ -193,7 +193,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> Task for ModelTask<T>
             .write::<T>(
                 &self.collection_name,
                 &records,
-                self.config.write_options.clone(),
+                self.config.write_options.clone().into(),
             )
             .await
         {

@@ -187,12 +187,17 @@ impl ReplicationManagerBuilder {
             .target_uri
             .ok_or(TuxedoError::ConfigError("No target_uri provided.".into()))?;
 
+        let compressors = self.compressors;
+
         let max_pool_size = self.config.thread_count as u32;
         let min_pool_size = self.config.thread_count as u32;
+        let max_connecting = self.config.thread_count as u32;
 
         let mut source_client_options = ClientOptions::parse(source_uri).await?;
         source_client_options.max_pool_size = max_pool_size.into();
         source_client_options.min_pool_size = min_pool_size.into();
+        source_client_options.max_connecting = max_connecting.into();
+        source_client_options.compressors = compressors.clone();
         // Make the database Read only as much as we have control to do
         source_client_options.read_concern = ReadConcern::majority().into();
         let source_client = Client::with_options(source_client_options)?;
@@ -200,7 +205,12 @@ impl ReplicationManagerBuilder {
         let mut target_client_options = ClientOptions::parse(target_uri).await?;
         target_client_options.max_pool_size = max_pool_size.into();
         target_client_options.min_pool_size = min_pool_size.into();
+        target_client_options.max_connecting = max_connecting.into();
+        target_client_options.compressors = compressors;
         let target_client = Client::with_options(target_client_options)?;
+
+        // target_client.warm_connection_pool().await;
+        // source_client.warm_connection_pool().await;
 
         let source_db_name = self
             .source_db
