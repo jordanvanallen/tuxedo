@@ -133,6 +133,8 @@ impl ReplicationManagerBuilder {
             builder = builder.align_cursor_batch_size();
         }
 
+        // TODO: Enable adaptive batching?
+
         if compression {
             builder = builder.add_compression();
         }
@@ -189,7 +191,7 @@ impl ReplicationManagerBuilder {
 
         let compressors = self.compressors;
 
-        let max_pool_size = self.config.thread_count as u32;
+        let max_pool_size = (self.config.thread_count * 2) as u32;
         let min_pool_size = self.config.thread_count as u32;
         let max_connecting = self.config.thread_count as u32;
 
