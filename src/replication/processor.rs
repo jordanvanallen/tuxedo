@@ -59,9 +59,9 @@ pub(crate) trait Processor: Send + Sync {
     async fn setup_adaptive_batching(
         &self,
         dbs: &Arc<DatabasePair>,
-        total_documents: usize,
-        query: Document,
-        mut read_options: FindOptions,
+        _total_documents: usize,
+        _query: Document,
+        _read_options: FindOptions,
         target_bytes: Option<u64>,
     ) -> TuxedoResult<BatchingOptions> {
         let average_document_size = dbs.get_average_document_size(self.collection_name()).await?;
@@ -95,18 +95,18 @@ pub(crate) trait Processor: Send + Sync {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-struct BatchingOptions {
+pub(crate) struct BatchingOptions {
     batch_size: u64,
     cursor_batch_size: u64,
 }
 
-pub(crate) struct ModelProcessor<T: Mask + Serialize + DeserializeOwned + Send + Sync> {
+pub(crate) struct ModelProcessor<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> {
     config: ProcessorConfig,
     collection_name: String,
     _phantom_data: PhantomData<T>,
 }
 
-impl<T: Mask + Serialize + DeserializeOwned + Send + Sync> ModelProcessor<T> {
+impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> ModelProcessor<T> {
     pub(crate) fn new(collection_name: impl Into<String>, config: ProcessorConfig) -> Self {
         Self {
             config,
@@ -133,7 +133,7 @@ impl<T: Send + Sync> ReplicatorProcessor<T> {
 }
 
 #[async_trait]
-impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static> Processor
+impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static> Processor
 for ModelProcessor<T>
 {
     async fn run(

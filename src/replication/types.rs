@@ -4,6 +4,7 @@ use futures_util::TryStreamExt;
 use mongodb::options::{FindOptions, InsertManyOptions};
 use mongodb::{Database, IndexModel};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use mongodb::Cursor;
 
 #[derive(Debug)]
 pub(crate) struct DatabasePair {
@@ -16,19 +17,17 @@ impl DatabasePair {
         Self { source, target }
     }
 
-    pub(crate) async fn read<T: Serialize + DeserializeOwned + Send + Sync>(
+    pub(crate) async fn read<T: Serialize + DeserializeOwned + Unpin + Send + Sync>(
         &self,
         collection_name: &str,
         query: Document,
         options: Option<FindOptions>,
-    ) -> TuxedoResult<Vec<T>> {
+    ) -> TuxedoResult<Cursor<T>> {
         Ok(self
             .source
             .collection::<T>(collection_name)
             .find(query)
             .with_options(options)
-            .await?
-            .try_collect()
             .await?)
     }
 
@@ -47,14 +46,12 @@ impl DatabasePair {
         collection_name: &str,
         query: Document,
         options: Option<FindOptions>,
-    ) -> TuxedoResult<Vec<Document>> {
+    ) -> TuxedoResult<Cursor<Document>> {
         Ok(self
             .source
             .collection::<Document>(collection_name)
             .find(query)
             .with_options(options)
-            .await?
-            .try_collect()
             .await?)
     }
 

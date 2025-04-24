@@ -143,7 +143,7 @@ impl ReplicationManagerBuilder {
         builder
     }
 
-    pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static>(
+    pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static>(
         self,
         collection_name: impl Into<String>,
     ) -> Self {
@@ -152,7 +152,7 @@ impl ReplicationManagerBuilder {
     }
 
     pub fn add_processor_with_config<
-        T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static,
+        T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static,
     >(
         mut self,
         collection_name: impl Into<String>,
@@ -247,7 +247,7 @@ impl ReplicationManagerBuilder {
 
         let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count);
 
-        let task_manager = ReplicationManager {
+        let manager = ReplicationManager {
             dbs,
             processors: self.processors,
             config: self.config,
@@ -255,6 +255,6 @@ impl ReplicationManagerBuilder {
             task_sender,
         };
 
-        Ok(task_manager)
+        Ok(manager)
     }
 }
