@@ -6,7 +6,7 @@ use super::{
 use crate::replication::task::TaskConfig;
 use crate::{Mask, TuxedoResult};
 use async_trait::async_trait;
-use bson::{Document, RawDocumentBuf};
+use bson::{Document, doc, RawDocumentBuf};
 use indicatif::ProgressBar;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_derive::Deserialize;
