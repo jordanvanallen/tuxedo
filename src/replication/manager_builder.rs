@@ -4,8 +4,9 @@ use crate::replication::processor::{ModelProcessor, ReplicatorProcessor};
 use crate::replication::types::{DatabasePair, ReplicationStrategy};
 use crate::{Mask, TuxedoError, TuxedoResult};
 use bson::Document;
+use mongodb::options::FindOptions;
 use mongodb::{
-    options::{ClientOptions, ReadConcern},
+    options::{ClientOptions, Compressor, InsertManyOptions, ReadConcern},
     Client,
 };
 use serde::{de::DeserializeOwned, Serialize};
@@ -19,6 +20,7 @@ pub struct ReplicationManagerBuilder {
     target_db: Option<String>,
     thread_count: usize,
     config: ReplicationConfig,
+    compressors: Option<Vec<Compressor>>,
     processors: Vec<Box<dyn Processor>>,
 }
 
@@ -40,6 +42,7 @@ impl ReplicationManagerBuilder {
             target_db: None,
             thread_count: available_threads,
             config: ReplicationConfig::default(),
+            compressors: None,
             processors: Vec::new(),
         }
     }
@@ -78,22 +81,69 @@ impl ReplicationManagerBuilder {
         self
     }
 
-    pub fn batch_size<S: Into<usize>>(mut self, size: S) -> Self {
+    pub fn batch_size(mut self, size: impl Into<u64>) -> Self {
         self.config.batch_size = size.into();
         self
     }
 
-    // pub fn write_options(mut self, options: impl Into<Opion<InsertManyOptions>>) -> Self {
-    //     self.write_options = options.into();
-    //     self
-    // }
-
-    pub fn bypass_document_validation<B: Into<bool>>(mut self, bypass: B) -> Self {
-        self.config.bypass_document_validation = bypass.into();
+    pub fn cursor_batch_size(mut self, size: impl Into<u64>) -> Self {
+        self.config.cursor_batch_size = Some(size.into());
         self
     }
 
-    pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static>(
+    pub fn align_cursor_batch_size(mut self) -> Self {
+        self.config.cursor_batch_size = Some((self.config.batch_size as f64 * 1.2) as u64);
+        self
+    }
+
+    pub fn write_options(mut self, options: impl Into<InsertManyOptions>) -> Self {
+        self.config.write_options = options.into();
+        self
+    }
+
+    pub fn read_options(mut self, options: impl Into<FindOptions>) -> Self {
+        self.config.read_options = options.into();
+        self
+    }
+
+    pub fn add_compression(mut self) -> Self {
+        self.compressors = Some(vec![
+            // Zstd offers the best compression ratio and good performance
+            Compressor::Zstd { level: None },
+            // Zlib is widely supported with good compression
+            Compressor::Zlib { level: None },
+            // Snappy is fastest but has lower compression ratio
+            Compressor::Snappy,
+        ]);
+        self
+    }
+
+    pub fn adaptive_batching(mut self) -> Self {
+        self.config.adaptive_batching = true;
+        self
+    }
+
+    pub fn optimize_for_performance(self, compression: bool) -> Self {
+        let mut builder = self;
+
+        builder.config.write_options.ordered = false.into();
+        builder.config.write_options.bypass_document_validation = true.into();
+
+        if builder.config.cursor_batch_size.is_none() {
+            builder = builder.align_cursor_batch_size();
+        }
+
+        // TODO: Enable adaptive batching?
+
+        if compression {
+            builder = builder.add_compression();
+        }
+
+
+        builder
+    }
+
+    pub fn add_processor<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static>(
         self,
         collection_name: impl Into<String>,
     ) -> Self {
@@ -102,7 +152,7 @@ impl ReplicationManagerBuilder {
     }
 
     pub fn add_processor_with_config<
-        T: Mask + Serialize + DeserializeOwned + Send + Sync + 'static,
+        T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static,
     >(
         mut self,
         collection_name: impl Into<String>,
@@ -139,12 +189,17 @@ impl ReplicationManagerBuilder {
             .target_uri
             .ok_or(TuxedoError::ConfigError("No target_uri provided.".into()))?;
 
-        let max_pool_size = self.config.thread_count as u32;
+        let compressors = self.compressors;
+
+        let max_pool_size = (self.config.thread_count * 2) as u32;
         let min_pool_size = self.config.thread_count as u32;
+        let max_connecting = self.config.thread_count as u32;
 
         let mut source_client_options = ClientOptions::parse(source_uri).await?;
         source_client_options.max_pool_size = max_pool_size.into();
         source_client_options.min_pool_size = min_pool_size.into();
+        source_client_options.max_connecting = max_connecting.into();
+        source_client_options.compressors = compressors.clone();
         // Make the database Read only as much as we have control to do
         source_client_options.read_concern = ReadConcern::majority().into();
         let source_client = Client::with_options(source_client_options)?;
@@ -152,7 +207,12 @@ impl ReplicationManagerBuilder {
         let mut target_client_options = ClientOptions::parse(target_uri).await?;
         target_client_options.max_pool_size = max_pool_size.into();
         target_client_options.min_pool_size = min_pool_size.into();
+        target_client_options.max_connecting = max_connecting.into();
+        target_client_options.compressors = compressors;
         let target_client = Client::with_options(target_client_options)?;
+
+        // target_client.warm_connection_pool().await;
+        // source_client.warm_connection_pool().await;
 
         let source_db_name = self
             .source_db
@@ -187,7 +247,7 @@ impl ReplicationManagerBuilder {
 
         let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count);
 
-        let task_manager = ReplicationManager {
+        let manager = ReplicationManager {
             dbs,
             processors: self.processors,
             config: self.config,
@@ -195,6 +255,6 @@ impl ReplicationManagerBuilder {
             task_sender,
         };
 
-        Ok(task_manager)
+        Ok(manager)
     }
 }

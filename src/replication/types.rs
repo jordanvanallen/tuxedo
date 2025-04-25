@@ -1,7 +1,8 @@
-use crate::replication::task::{QueryConfig, WriteConfig};
 use crate::TuxedoResult;
-use bson::Document;
+use bson::{doc, Document};
 use futures_util::TryStreamExt;
+use mongodb::options::{FindOptions, InsertManyOptions};
+use mongodb::Cursor;
 use mongodb::{Database, IndexModel};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
@@ -16,33 +17,41 @@ impl DatabasePair {
         Self { source, target }
     }
 
-    pub(crate) async fn read<T: Serialize + DeserializeOwned + Send + Sync>(
+    pub(crate) async fn read<T: Serialize + DeserializeOwned + Unpin + Send + Sync>(
         &self,
         collection_name: &str,
-        config: &QueryConfig,
-    ) -> TuxedoResult<Vec<T>> {
+        query: Document,
+        options: Option<FindOptions>,
+    ) -> TuxedoResult<Cursor<T>> {
         Ok(self
             .source
             .collection::<T>(collection_name)
-            .find(config.query.clone())
-            .with_options(config.mongo_find_options())
-            .await?
-            .try_collect()
+            .find(query)
+            .with_options(options)
             .await?)
+    }
+
+    pub(crate) async fn get_average_document_size(&self, collection_name: &str) -> TuxedoResult<u64> {
+        let stats = self
+            .source
+            .run_command(doc! { "collStats": collection_name })
+            .await?;
+
+        let avg_doc_size = stats.get_f64("avgObjSize").unwrap_or(1024.0);
+        Ok(avg_doc_size as u64)
     }
 
     pub(crate) async fn read_documents(
         &self,
         collection_name: &str,
-        config: &QueryConfig,
-    ) -> TuxedoResult<Vec<Document>> {
+        query: Document,
+        options: Option<FindOptions>,
+    ) -> TuxedoResult<Cursor<Document>> {
         Ok(self
             .source
             .collection::<Document>(collection_name)
-            .find(config.query.clone())
-            .with_options(config.mongo_find_options())
-            .await?
-            .try_collect()
+            .find(query)
+            .with_options(options)
             .await?)
     }
 
@@ -62,13 +71,13 @@ impl DatabasePair {
     pub(crate) async fn write<T: Send + Sync + Serialize>(
         &self,
         collection_name: &str,
-        write_config: &WriteConfig,
-        records: &Vec<T>,
+        records: &[T],
+        options: Option<InsertManyOptions>,
     ) -> TuxedoResult<()> {
         self.target
             .collection::<T>(collection_name)
             .insert_many(records)
-            .with_options(write_config.insert_many_options())
+            .with_options(options)
             .await?;
         Ok(())
     }
