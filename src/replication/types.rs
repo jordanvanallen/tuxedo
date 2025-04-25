@@ -2,9 +2,9 @@ use crate::TuxedoResult;
 use bson::{doc, Document};
 use futures_util::TryStreamExt;
 use mongodb::options::{FindOptions, InsertManyOptions};
+use mongodb::Cursor;
 use mongodb::{Database, IndexModel};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use mongodb::Cursor;
 
 #[derive(Debug)]
 pub(crate) struct DatabasePair {
@@ -31,14 +31,14 @@ impl DatabasePair {
             .await?)
     }
 
-    pub(crate) async fn get_average_document_size(&self, collection_name: &str) -> TuxedoResult<f64> {
+    pub(crate) async fn get_average_document_size(&self, collection_name: &str) -> TuxedoResult<u64> {
         let stats = self
             .source
             .run_command(doc! { "collStats": collection_name })
             .await?;
 
         let avg_doc_size = stats.get_f64("avgObjSize").unwrap_or(1024.0);
-        Ok(avg_doc_size)
+        Ok(avg_doc_size as u64)
     }
 
     pub(crate) async fn read_documents(

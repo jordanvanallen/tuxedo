@@ -8,7 +8,6 @@ use crate::{Mask, TuxedoResult};
 use async_trait::async_trait;
 use bson::{Document, RawDocumentBuf};
 use indicatif::ProgressBar;
-use mongodb::options::FindOptions;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_derive::Deserialize;
 use std::marker::PhantomData;
@@ -59,15 +58,12 @@ pub(crate) trait Processor: Send + Sync {
     async fn setup_adaptive_batching(
         &self,
         dbs: &Arc<DatabasePair>,
-        _total_documents: usize,
-        _query: Document,
-        _read_options: FindOptions,
         target_bytes: Option<u64>,
     ) -> TuxedoResult<BatchingOptions> {
         let average_document_size = dbs.get_average_document_size(self.collection_name()).await?;
-        let target_bytes = target_bytes.unwrap_or_else(|| calculate_optimal_target_bytes(average_document_size as u64));
+        let target_bytes = target_bytes.unwrap_or_else(|| calculate_optimal_target_bytes(average_document_size));
         // Calculate docs to match target_bytes (at least 1 document)
-        let optimal_document_count = target_bytes / average_document_size as u64;
+        let optimal_document_count = target_bytes / average_document_size;
         let batch_size = optimal_document_count.max(1);
         let cursor_batch_size = self.aligned_batch_cursor_size(batch_size);
 
@@ -186,9 +182,6 @@ for ModelProcessor<T>
         if self.config.adaptive_batching == Some(true) || default_config.adaptive_batching {
             if let Ok(batch_options) = self.setup_adaptive_batching(
                 &dbs,
-                total_documents,
-                self.config.query.clone(),
-                default_config.read_options.clone(),
                 target_batch_bytes,
             ).await {
                 batch_size = batch_options.batch_size;
@@ -256,27 +249,27 @@ for ModelProcessor<T>
 fn calculate_optimal_target_bytes(average_document_size: u64) -> u64 {
     // For very small documents (<1KB), use larger batches to reduce i/o overhead
     if average_document_size < 1024 {
-        return to_mb(30);
+        return to_mb(75);
     }
 
     // For small documents (1KB-10KB), use standard batch size
     if average_document_size < 10 * 1024 {
-        return to_mb(20);
+        return to_mb(50);
     }
 
     // For medium documents (10KB-100KB), use moderate batch size
     if average_document_size < 100 * 1024 {
-        return to_mb(10);
+        return to_mb(30);
     }
 
     // For large documents (100KB-500KB), use smaller batches
     if average_document_size < 500 * 1024 {
-        return to_mb(5);
+        return to_mb(15);
     }
 
     // For very large documents (>500KB), use minimal batches
     // to avoid excessive memory pressure
-    to_mb(3)
+    to_mb(5)
 }
 
 fn to_mb(size: u64) -> u64 {
@@ -332,9 +325,6 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
         if self.config.adaptive_batching == Some(true) || default_config.adaptive_batching {
             if let Ok(batch_options) = self.setup_adaptive_batching(
                 &dbs,
-                total_documents,
-                self.config.query.clone(),
-                default_config.read_options.clone(),
                 target_batch_bytes,
             ).await {
                 batch_size = batch_options.batch_size;

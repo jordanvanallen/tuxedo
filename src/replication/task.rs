@@ -2,7 +2,6 @@ use super::types::{DatabasePair, ReplicationStrategy};
 use crate::Mask;
 use async_trait::async_trait;
 use bson::Document;
-use futures_util::TryStreamExt;
 use indicatif::ProgressBar;
 use mongodb::options::{FindOptions, InsertManyOptions};
 use serde::{de::DeserializeOwned, Serialize};
@@ -132,14 +131,14 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
             // If advance returned Ok(true), we can deserialize the current document
             // Deserialize the current document using the faster method
             let mut doc = match cursor.deserialize_current() {
-                 Ok(d) => d,
-                 Err(e) => {
-                     println!(
-                         "Failed to deserialize document for collection: `{}`. Skipping document. Error: {}",
-                         &self.collection_name, e
-                     );
-                     continue; // Skip this document
-                 }
+                Ok(d) => d,
+                Err(e) => {
+                    println!(
+                        "Failed to deserialize document for collection: `{}`. Skipping document. Error: {}",
+                        &self.collection_name, e
+                    );
+                    continue; // Skip this document
+                }
             };
 
             // Apply masking if lambda exists
@@ -177,32 +176,32 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
 
         // Write any remaining documents
         if !write_batch.is_empty() {
-             if let Err(e) = self
-                 .dbs
-                 .write::<Document>(
-                     &self.collection_name,
-                     &write_batch,
-                     self.config.write_options.clone().into(),
-                 )
-                 .await
-             {
-                 println!(
-                     "Failed to insert final batch of {} records into collection: `{}`. Error: {}",
-                     write_batch.len(),
-                     &self.collection_name,
-                     e
-                 );
-             } else {
-                  self.update_progress_bar(&self.progress_bar, write_batch.len());
-             }
+            if let Err(e) = self
+                .dbs
+                .write::<Document>(
+                    &self.collection_name,
+                    &write_batch,
+                    self.config.write_options.clone().into(),
+                )
+                .await
+            {
+                println!(
+                    "Failed to insert final batch of {} records into collection: `{}`. Error: {}",
+                    write_batch.len(),
+                    &self.collection_name,
+                    e
+                );
+            } else {
+                self.update_progress_bar(&self.progress_bar, write_batch.len());
+            }
         }
 
         if total_processed == 0 {
-             println!(
-                 "No records found or processed for batch. Query: {:?} with read options: {:?}",
-                 &self.config.query,
-                 &self.config.read_options,
-             );
+            println!(
+                "No records found or processed for batch. Query: {:?} with read options: {:?}",
+                &self.config.query,
+                &self.config.read_options,
+            );
         }
     }
 }
@@ -210,13 +209,13 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
 #[async_trait]
 impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for ModelTask<T> {
     async fn run(&self) {
-         // Get the cursor
+        // Get the cursor
         let mut cursor = match self
             .dbs
             .read::<T>( // Use the typed read method
-                &self.collection_name,
-                self.config.query.clone(),
-                self.config.read_options.clone().into(),
+                        &self.collection_name,
+                        self.config.query.clone(),
+                        self.config.read_options.clone().into(),
             )
             .await
         {
@@ -252,14 +251,14 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
             // If advance returned Ok(true), we can deserialize the current document
             // Deserialize the current document using the faster method
             let mut record = match cursor.deserialize_current() {
-                 Ok(d) => d,
-                 Err(e) => {
-                     println!(
-                         "Failed to deserialize document for collection: `{}`. Skipping document. Error: {}",
-                         &self.collection_name, e
-                     );
-                     continue; // Skip this document
-                 }
+                Ok(d) => d,
+                Err(e) => {
+                    println!(
+                        "Failed to deserialize document for collection: `{}`. Skipping document. Error: {}",
+                        &self.collection_name, e
+                    );
+                    continue; // Skip this document
+                }
             };
 
             // Apply masking if strategy requires it
@@ -275,9 +274,9 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
                 if let Err(e) = self
                     .dbs
                     .write::<T>( // Use typed write
-                        &self.collection_name,
-                        &write_batch,
-                        self.config.write_options.clone().into(),
+                                 &self.collection_name,
+                                 &write_batch,
+                                 self.config.write_options.clone().into(),
                     )
                     .await
                 {
@@ -287,42 +286,43 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
                         &self.collection_name,
                         e
                     );
-                    // Decide how to handle batch write errors
+                    // TODO; Decide how to handle batch write errors
+                    // For now just keep going
                 } else {
-                     self.update_progress_bar(&self.progress_bar, write_batch.len());
+                    self.update_progress_bar(&self.progress_bar, write_batch.len());
                 }
-                 write_batch.clear();
+                write_batch.clear();
             }
         }
 
         // Write any remaining documents
         if !write_batch.is_empty() {
             if let Err(e) = self
-                 .dbs
-                 .write::<T>( // Use typed write
-                     &self.collection_name,
-                     &write_batch,
-                     self.config.write_options.clone().into(),
-                 )
-                 .await
-             {
-                 println!(
-                     "Failed to insert final batch of {} records into collection: `{}`. Error: {}",
-                     write_batch.len(),
-                     &self.collection_name,
-                     e
-                 );
-             } else {
-                  self.update_progress_bar(&self.progress_bar, write_batch.len());
-             }
+                .dbs
+                .write::<T>( // Use typed write
+                             &self.collection_name,
+                             &write_batch,
+                             self.config.write_options.clone().into(),
+                )
+                .await
+            {
+                println!(
+                    "Failed to insert final batch of {} records into collection: `{}`. Error: {}",
+                    write_batch.len(),
+                    &self.collection_name,
+                    e
+                );
+            } else {
+                self.update_progress_bar(&self.progress_bar, write_batch.len());
+            }
         }
 
-         if total_processed == 0 {
-             println!(
-                 "No records found or processed for batch. Query: {:?} with read options: {:?}",
-                 &self.config.query,
-                 &self.config.read_options,
-             );
-         }
+        if total_processed == 0 {
+            println!(
+                "No records found or processed for batch. Query: {:?} with read options: {:?}",
+                &self.config.query,
+                &self.config.read_options,
+            );
+        }
     }
 }
