@@ -6,7 +6,7 @@ use super::{
 use crate::replication::task::TaskConfig;
 use crate::{Mask, TuxedoResult};
 use async_trait::async_trait;
-use bson::{Document, doc, RawDocumentBuf};
+use bson::{doc, Document, RawDocumentBuf};
 use indicatif::ProgressBar;
 use serde::{de::DeserializeOwned, Serialize};
 use serde_derive::Deserialize;
@@ -171,11 +171,7 @@ for ModelProcessor<T>
         );
 
         if total_documents == 0 {
-            progress_bar.finish_with_message("No records to process.");
-            println!(
-                "No records to process for collection: {}. Skipping.",
-                &self.collection_name,
-            );
+            progress_bar.finish_and_clear();
             return;
         }
 
@@ -318,11 +314,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
         );
 
         if total_documents == 0 {
-            progress_bar.finish_with_message("No records to process.");
-            println!(
-                "No records to process for collection: {}. Skipping.",
-                &self.collection_name,
-            );
+            progress_bar.finish_and_clear();
             return;
         }
 
