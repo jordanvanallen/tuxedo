@@ -177,9 +177,9 @@ for ModelProcessor<T>
 
             let mut read_options = default_config.read_options.clone();
             // Ensure stable sort order for skip/limit pagination
-            if read_options.sort.is_none() {
-                read_options.sort = Some(doc! { "_id": 1 });
-            }
+            // if read_options.sort.is_none() {
+            //     read_options.sort = Some(doc! { "_id": 1 });
+            // }
             read_options.skip = (skip as u64).into();
             read_options.limit = limit.into();
             read_options.batch_size = Some(limit as u32);
@@ -302,9 +302,9 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
 
             let mut read_options = default_config.read_options.clone();
             // Ensure stable sort order for skip/limit pagination
-            if read_options.sort.is_none() {
-                read_options.sort = Some(doc! { "_id": 1 });
-            }
+            // if read_options.sort.is_none() {
+            //     read_options.sort = Some(doc! { "_id": 1 });
+            // }
             read_options.skip = (skip as u64).into();
             read_options.limit = limit.into();
             read_options.batch_size = Some(limit as u32);
