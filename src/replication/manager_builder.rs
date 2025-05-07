@@ -86,16 +86,6 @@ impl ReplicationManagerBuilder {
         self
     }
 
-    pub fn cursor_batch_size(mut self, size: impl Into<u64>) -> Self {
-        self.config.cursor_batch_size = Some(size.into());
-        self
-    }
-
-    pub fn align_cursor_batch_size(mut self) -> Self {
-        self.config.cursor_batch_size = Some((self.config.batch_size as f64 * 1.2) as u64);
-        self
-    }
-
     pub fn write_options(mut self, options: impl Into<InsertManyOptions>) -> Self {
         self.config.write_options = options.into();
         self
@@ -128,12 +118,6 @@ impl ReplicationManagerBuilder {
 
         builder.config.write_options.ordered = false.into();
         builder.config.write_options.bypass_document_validation = true.into();
-
-        if builder.config.cursor_batch_size.is_none() {
-            builder = builder.align_cursor_batch_size();
-        }
-
-        // TODO: Enable adaptive batching?
 
         if compression {
             builder = builder.add_compression();
