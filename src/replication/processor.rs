@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use bson::{doc, Document, RawDocumentBuf};
 use indicatif::ProgressBar;
 use serde::{de::DeserializeOwned, Serialize};
-use serde_derive::Deserialize;
 use std::marker::PhantomData;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -58,23 +57,14 @@ pub(crate) trait Processor: Send + Sync {
     async fn setup_adaptive_batching(
         &self,
         dbs: &Arc<DatabasePair>,
-        target_bytes: Option<u64>,
-    ) -> TuxedoResult<BatchingOptions> {
+    ) -> TuxedoResult<u64> {
         let average_document_size = dbs.get_average_document_size(self.collection_name()).await?;
-        let target_bytes = target_bytes.unwrap_or_else(|| calculate_optimal_target_bytes(average_document_size));
+        let target_bytes = calculate_optimal_target_bytes(average_document_size);
         // Calculate docs to match target_bytes (at least 1 document)
         let optimal_document_count = target_bytes / average_document_size;
         let batch_size = optimal_document_count.max(1);
-        let cursor_batch_size = self.aligned_batch_cursor_size(batch_size);
 
-        Ok(BatchingOptions {
-            batch_size,
-            cursor_batch_size,
-        })
-    }
-
-    fn aligned_batch_cursor_size(&self, batch_size: u64) -> u64 {
-        (batch_size as f64 * 1.2).ceil() as u64
+        Ok(batch_size)
     }
 
     async fn copy_indexes(&self, dbs: &Arc<DatabasePair>) {
@@ -88,12 +78,6 @@ pub(crate) trait Processor: Send + Sync {
     }
 
     fn collection_name(&self) -> &str;
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct BatchingOptions {
-    batch_size: u64,
-    cursor_batch_size: u64,
 }
 
 pub(crate) struct ModelProcessor<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> {
@@ -140,18 +124,6 @@ for ModelProcessor<T>
         progress_bar: ProgressBar,
     ) {
         let mut batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
-        let target_batch_bytes: Option<u64> = self
-            .config
-            .target_batch_bytes
-            .or(default_config.target_batch_bytes)
-            .map(|o| o as u64);
-        let mut cursor_batch_size: u64 = self
-            .config
-            .cursor_batch_size
-            .unwrap_or(
-                default_config.cursor_batch_size
-                    .unwrap_or(self.aligned_batch_cursor_size(batch_size))
-            );
 
         let total_documents = match self.get_total_documents(
             &dbs,
@@ -176,12 +148,8 @@ for ModelProcessor<T>
         }
 
         if self.config.adaptive_batching == Some(true) || default_config.adaptive_batching {
-            if let Ok(batch_options) = self.setup_adaptive_batching(
-                &dbs,
-                target_batch_bytes,
-            ).await {
-                batch_size = batch_options.batch_size;
-                cursor_batch_size = batch_options.cursor_batch_size;
+            if let Ok(adaptive_batch_size) = self.setup_adaptive_batching(&dbs).await {
+                batch_size = adaptive_batch_size;
             }
         }
 
@@ -214,7 +182,7 @@ for ModelProcessor<T>
             }
             read_options.skip = (skip as u64).into();
             read_options.limit = limit.into();
-            read_options.batch_size = Some(cursor_batch_size as u32);
+            read_options.batch_size = Some(limit as u32);
 
             let task = Box::new(ModelTask::<T>::new(
                 dbs,
@@ -286,18 +254,6 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
         progress_bar: ProgressBar,
     ) {
         let mut batch_size = self.config.batch_size.unwrap_or(default_config.batch_size);
-        let target_batch_bytes: Option<u64> = self
-            .config
-            .target_batch_bytes
-            .or(default_config.target_batch_bytes)
-            .map(|o| o as u64);
-        let mut cursor_batch_size: u64 = self
-            .config
-            .cursor_batch_size
-            .unwrap_or(
-                default_config.cursor_batch_size
-                    .unwrap_or(self.aligned_batch_cursor_size(batch_size))
-            );
 
         let total_documents = match self.get_total_documents(
             &dbs,
@@ -319,12 +275,8 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
         }
 
         if self.config.adaptive_batching == Some(true) || default_config.adaptive_batching {
-            if let Ok(batch_options) = self.setup_adaptive_batching(
-                &dbs,
-                target_batch_bytes,
-            ).await {
-                batch_size = batch_options.batch_size;
-                cursor_batch_size = batch_options.cursor_batch_size;
+            if let Ok(adaptive_batch_size) = self.setup_adaptive_batching(&dbs).await {
+                batch_size = adaptive_batch_size;
             }
         }
 
@@ -355,7 +307,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
             }
             read_options.skip = (skip as u64).into();
             read_options.limit = limit.into();
-            read_options.batch_size = Some(cursor_batch_size as u32);
+            read_options.batch_size = Some(limit as u32);
 
             let task = Box::new(ReplicatorTask::<T>::new(
                 dbs,
@@ -391,9 +343,7 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
 #[derive(Debug, Default)]
 pub struct ProcessorConfig {
     adaptive_batching: Option<bool>,
-    target_batch_bytes: Option<usize>,
     batch_size: Option<u64>,
-    cursor_batch_size: Option<u64>,
     query: Document,
 }
 
@@ -418,16 +368,6 @@ impl ProcessorConfigBuilder {
         self
     }
 
-    pub fn cursor_batch_size(mut self, size: impl Into<u64>) -> Self {
-        self.config.cursor_batch_size = Some(size.into());
-        self
-    }
-
-    pub fn target_batch_bytes(mut self, size: impl Into<Option<usize>>) -> Self {
-        self.config.target_batch_bytes = size.into();
-        self
-    }
-
     pub fn query<Q: Into<Document>>(mut self, query: Q) -> Self {
         self.config.query = query.into();
         self
@@ -446,9 +386,7 @@ impl ProcessorConfigBuilder {
 #[derive(Default)]
 pub struct ReplicatorConfig {
     adaptive_batching: Option<bool>,
-    target_batch_bytes: Option<usize>,
     batch_size: Option<u64>,
-    cursor_batch_size: Option<u64>,
     query: Document,
     lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
 }
@@ -456,16 +394,12 @@ pub struct ReplicatorConfig {
 impl ReplicatorConfig {
     fn new(
         batch_size: Option<u64>,
-        cursor_batch_size: Option<u64>,
-        target_batch_bytes: Option<usize>,
         query: Document,
         adaptive_batching: Option<bool>,
         lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
     ) -> Self {
         Self {
             batch_size,
-            cursor_batch_size,
-            target_batch_bytes,
             query,
             adaptive_batching,
             lambda,
@@ -480,8 +414,6 @@ impl ReplicatorConfig {
 #[derive(Default)]
 pub struct ReplicationConfigBuilder {
     batch_size: Option<u64>,
-    cursor_batch_size: Option<u64>,
-    target_batch_bytes: Option<usize>,
     query: Document,
     adaptive_batching: Option<bool>,
     lambda: Option<Arc<dyn Fn(&mut Document) + Send + Sync>>,
@@ -494,16 +426,6 @@ impl ReplicationConfigBuilder {
 
     pub fn batch_size(mut self, size: impl Into<Option<u64>>) -> Self {
         self.batch_size = size.into();
-        self
-    }
-
-    pub fn cursor_batch_size(mut self, size: impl Into<Option<u64>>) -> Self {
-        self.cursor_batch_size = size.into();
-        self
-    }
-
-    pub fn target_batch_bytes(mut self, size: impl Into<Option<usize>>) -> Self {
-        self.target_batch_bytes = size.into();
         self
     }
 
@@ -528,8 +450,6 @@ impl ReplicationConfigBuilder {
     pub fn build(self) -> ReplicatorConfig {
         ReplicatorConfig::new(
             self.batch_size,
-            self.cursor_batch_size,
-            self.target_batch_bytes,
             self.query,
             self.adaptive_batching,
             self.lambda,

@@ -13,10 +13,8 @@ use tokio::task::JoinSet;
 pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
     pub(crate) batch_size: u64,
-    pub(crate) cursor_batch_size: Option<u64>,
     pub(crate) strategy: ReplicationStrategy,
     pub(crate) adaptive_batching: bool,
-    pub(crate) target_batch_bytes: Option<usize>,
     pub(crate) write_options: InsertManyOptions,
     pub(crate) read_options: FindOptions,
 }
@@ -27,13 +25,11 @@ impl Default for ReplicationConfig {
 
         Self {
             batch_size,
-            cursor_batch_size: None,
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
             write_options: Default::default(),
             read_options: Default::default(),
             adaptive_batching: false,
-            target_batch_bytes: None,
         }
     }
 }
