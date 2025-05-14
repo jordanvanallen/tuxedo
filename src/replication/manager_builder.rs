@@ -12,6 +12,7 @@ use mongodb::{
 use serde::{de::DeserializeOwned, Serialize};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use url::Url;
 
 pub struct ReplicationManagerBuilder {
     source_uri: Option<String>,
@@ -86,6 +87,11 @@ impl ReplicationManagerBuilder {
         self
     }
 
+    pub fn write_batch_size(mut self, size: impl Into<u64>) -> Self {
+        self.config.write_batch_size = size.into();
+        self
+    }
+
     pub fn write_options(mut self, options: impl Into<InsertManyOptions>) -> Self {
         self.config.write_options = options.into();
         self
@@ -122,7 +128,6 @@ impl ReplicationManagerBuilder {
         if compression {
             builder = builder.add_compression();
         }
-
 
         builder
     }
@@ -168,18 +173,20 @@ impl ReplicationManagerBuilder {
     pub async fn build(self) -> TuxedoResult<ReplicationManager> {
         let source_uri = self
             .source_uri
+            .clone()
             .ok_or(TuxedoError::ConfigError("No source_uri provided.".into()))?;
         let target_uri = self
             .target_uri
+            .clone()
             .ok_or(TuxedoError::ConfigError("No target_uri provided.".into()))?;
 
-        let compressors = self.compressors;
+        let compressors = self.compressors.clone();
 
         let max_pool_size = (self.config.thread_count * 2) as u32;
         let min_pool_size = self.config.thread_count as u32;
         let max_connecting = self.config.thread_count as u32;
 
-        let mut source_client_options = ClientOptions::parse(source_uri).await?;
+        let mut source_client_options = ClientOptions::parse(&source_uri).await?;
         source_client_options.max_pool_size = max_pool_size.into();
         source_client_options.min_pool_size = min_pool_size.into();
         source_client_options.max_connecting = max_connecting.into();
@@ -188,7 +195,7 @@ impl ReplicationManagerBuilder {
         source_client_options.read_concern = ReadConcern::majority().into();
         let source_client = Client::with_options(source_client_options)?;
 
-        let mut target_client_options = ClientOptions::parse(target_uri).await?;
+        let mut target_client_options = ClientOptions::parse(&target_uri).await?;
         target_client_options.max_pool_size = max_pool_size.into();
         target_client_options.min_pool_size = min_pool_size.into();
         target_client_options.max_connecting = max_connecting.into();
@@ -198,12 +205,8 @@ impl ReplicationManagerBuilder {
         // target_client.warm_connection_pool().await;
         // source_client.warm_connection_pool().await;
 
-        let source_db_name = self
-            .source_db
-            .ok_or(TuxedoError::ConfigError("No source_db provided.".into()))?;
-        let target_db_name = self
-            .target_db
-            .ok_or(TuxedoError::ConfigError("No target_db provided.".into()))?;
+        let source_db_name = self.get_db_name(&source_uri, self.source_db.clone())?;
+        let target_db_name = self.get_db_name(&target_uri, self.target_db.clone())?;
 
         // Ensure our database connections are actually valid and we can make the connection
         // We intentionally want to blow up here if we can't connect to *either* DB to avoid a giant mess
@@ -240,5 +243,36 @@ impl ReplicationManagerBuilder {
         };
 
         Ok(manager)
+    }
+
+    fn get_db_name(&self, uri: &str, db_name: Option<String>) -> TuxedoResult<String> {
+        let parsed_db_name = self.parse_db_name_from_uri(uri)?;
+
+        match parsed_db_name {
+            Some(db_name) => Ok(db_name),
+            None => match db_name {
+                Some(db_name) => Ok(db_name),
+                None => Err(TuxedoError::ConfigError(
+                    "Could not parse database name from URI and no database name provided.".into(),
+                )),
+            },
+        }
+    }
+
+    fn parse_db_name_from_uri(&self, url: &str) -> TuxedoResult<Option<String>> {
+        let url = Url::parse(url).map_err(|e| TuxedoError::ConfigError(e.to_string()))?;
+        let path = url.path();
+        if path.is_empty() || path == "/" {
+            return Ok(None);
+        }
+
+        // Remove leading '/' and split by '?' to get rid of any query parameters
+        let db_name = path.trim_start_matches('/').split('?').next().unwrap();
+
+        if db_name.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(db_name.to_string()))
+        }
     }
 }

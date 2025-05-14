@@ -8,9 +8,6 @@ use serde::{de::DeserializeOwned, Serialize};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-// Define a write batch size constant
-const WRITE_BATCH_SIZE: usize = 1000;
-
 #[async_trait]
 pub(crate) trait Task: Send + Sync {
     async fn run(&self);
@@ -45,6 +42,7 @@ pub(crate) struct ReplicatorTask<T: Send> {
 #[derive(Debug)]
 pub(crate) struct TaskConfig {
     pub(crate) query: Document,
+    pub(crate) write_batch_size: u64,
     pub(crate) read_options: FindOptions,
     pub(crate) write_options: InsertManyOptions,
 }
@@ -113,12 +111,13 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
             }
         };
 
-        let mut write_batch: Vec<Document> = Vec::with_capacity(WRITE_BATCH_SIZE);
+        let mut write_batch: Vec<Document> =
+            Vec::with_capacity(self.config.write_batch_size as usize);
         let mut total_processed = 0;
 
         // Iterate using advance() and deserialize_current()
         while match cursor.advance().await {
-            Ok(true) => true, // Advanced successfully, okay to deserialize
+            Ok(true) => true,   // Advanced successfully, okay to deserialize
             Ok(false) => false, // End of cursor
             Err(e) => {
                 println!(
@@ -150,7 +149,7 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
             total_processed += 1;
 
             // Write in batches
-            if write_batch.len() >= WRITE_BATCH_SIZE {
+            if write_batch.len() >= self.config.write_batch_size as usize {
                 if let Err(e) = self
                     .dbs
                     .write::<Document>(
@@ -199,8 +198,7 @@ impl<T: Send + Sync> Task for ReplicatorTask<T> {
         if total_processed == 0 {
             println!(
                 "No records found or processed for batch. Query: {:?} with read options: {:?}",
-                &self.config.query,
-                &self.config.read_options,
+                &self.config.query, &self.config.read_options,
             );
         }
     }
@@ -212,10 +210,11 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
         // Get the cursor
         let mut cursor = match self
             .dbs
-            .read::<T>( // Use the typed read method
-                        &self.collection_name,
-                        self.config.query.clone(),
-                        self.config.read_options.clone().into(),
+            .read::<T>(
+                // Use the typed read method
+                &self.collection_name,
+                self.config.query.clone(),
+                self.config.read_options.clone().into(),
             )
             .await
         {
@@ -232,13 +231,13 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
             }
         };
 
-        let mut write_batch: Vec<T> = Vec::with_capacity(WRITE_BATCH_SIZE);
+        let mut write_batch: Vec<T> = Vec::with_capacity(self.config.write_batch_size as usize);
         let mut total_processed = 0;
         let use_masking = matches!(self.strategy, ReplicationStrategy::Mask);
 
         // Iterate using advance() and deserialize_current()
         while match cursor.advance().await {
-            Ok(true) => true, // Advanced successfully, okay to deserialize
+            Ok(true) => true,   // Advanced successfully, okay to deserialize
             Ok(false) => false, // End of cursor
             Err(e) => {
                 println!(
@@ -270,13 +269,14 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
             total_processed += 1;
 
             // Write in batches
-            if write_batch.len() >= WRITE_BATCH_SIZE {
+            if write_batch.len() >= self.config.write_batch_size as usize {
                 if let Err(e) = self
                     .dbs
-                    .write::<T>( // Use typed write
-                                 &self.collection_name,
-                                 &write_batch,
-                                 self.config.write_options.clone().into(),
+                    .write::<T>(
+                        // Use typed write
+                        &self.collection_name,
+                        &write_batch,
+                        self.config.write_options.clone().into(),
                     )
                     .await
                 {
@@ -299,10 +299,11 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
         if !write_batch.is_empty() {
             if let Err(e) = self
                 .dbs
-                .write::<T>( // Use typed write
-                             &self.collection_name,
-                             &write_batch,
-                             self.config.write_options.clone().into(),
+                .write::<T>(
+                    // Use typed write
+                    &self.collection_name,
+                    &write_batch,
+                    self.config.write_options.clone().into(),
                 )
                 .await
             {
@@ -320,8 +321,7 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
         if total_processed == 0 {
             println!(
                 "No records found or processed for batch. Query: {:?} with read options: {:?}",
-                &self.config.query,
-                &self.config.read_options,
+                &self.config.query, &self.config.read_options,
             );
         }
     }
