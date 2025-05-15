@@ -1,6 +1,6 @@
 [package]
 name = "tuxedo"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 authors = ["Jordan Van Allen <jordanvanallen@gmail.com>"]
 description = "A parallel masking library for MongoDB"
@@ -11,36 +11,29 @@ repository = "https://github.com/jordanvanallen/tuxedo"
 
 [dependencies]
 serde = "1.0"
-serde_derive = "1.0"
 serde_json = "1.0"
-serde_with = "3.11"
-#serde-aux = "4.5.0"
-#garde = "0.20.0"
 
 # Errors
 thiserror = "2.0"
 
 # Async
 tokio = { version = "1.42.0", features = ["full"] }
-futures = "0.3.31"
 futures-util = "0.3.31"
 async-trait = "0.1.83"
-rayon = "1.10.0"
 
 # Data faking / masking
-rand = "0.8.5"
 fake = "3.0"
-convert_case = "0.6"
 
 # CLI interface
 indicatif = { version = "0.17.9" }
 
 num_cpus = "1.16.0"
+url = "2.5.4"
 
 [dependencies.mongodb]
 version = "3.2.3"
 features = ["zlib-compression", "zstd-compression", "snappy-compression"]
 
 [dependencies.bson]
-version = "2.13.0"
+version = "2.14.0"
 features = ["serde_with", "chrono-0_4"]

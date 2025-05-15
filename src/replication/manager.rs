@@ -13,6 +13,7 @@ use tokio::task::JoinSet;
 pub(crate) struct ReplicationConfig {
     pub(crate) thread_count: usize,
     pub(crate) batch_size: u64,
+    pub(crate) write_batch_size: u64,
     pub(crate) strategy: ReplicationStrategy,
     pub(crate) adaptive_batching: bool,
     pub(crate) write_options: InsertManyOptions,
@@ -22,9 +23,11 @@ pub(crate) struct ReplicationConfig {
 impl Default for ReplicationConfig {
     fn default() -> Self {
         let batch_size = 1_000;
+        let write_batch_size = 1_000;
 
         Self {
             batch_size,
+            write_batch_size,
             strategy: ReplicationStrategy::Mask,
             thread_count: num_cpus::get(),
             write_options: Default::default(),
@@ -35,7 +38,7 @@ impl Default for ReplicationConfig {
 }
 
 pub struct ReplicationManager {
-    pub(crate) processors: Vec<Box<dyn Processor>>,
+    pub(crate) processors: Vec<Arc<Box<dyn Processor>>>,
     pub(crate) task_receiver: mpsc::Receiver<Box<dyn Task>>,
     pub(crate) task_sender: mpsc::Sender<Box<dyn Task>>,
     pub(crate) config: ReplicationConfig,
@@ -48,18 +51,19 @@ impl ReplicationManager {
         let progress_style = ProgressStyle::with_template(
             "{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}",
         )
-            .expect("Expected to set progress bar styling")
-            .progress_chars("█▓▒░");
+        .expect("Expected to set progress bar styling")
+        .progress_chars("█▓▒░");
 
         // Spawn processor runners
         let processor_handles: Vec<_> = self
             .processors
-            .into_iter()
-            .map(|processor| {
+            .iter()
+            .map(|processor_arc| {
                 let dbs = Arc::clone(&self.dbs);
                 let task_sender = self.task_sender.clone();
                 let default_config = self.config.clone();
                 let progress_bar = multi_progress.add(ProgressBar::new(0));
+                let processor = Arc::clone(processor_arc);
                 progress_bar.set_style(progress_style.clone());
 
                 task::spawn(async move {
@@ -116,6 +120,27 @@ impl ReplicationManager {
 
         // Wait for the task runner to finish running all the tasks
         runner_handle.await.expect("Runner failed");
+
+        // Iterate the processors again and call copy_indexes in individual threads
+        // We do this after all the other data has transferred to prevent the overhead
+        // of validations on every insert
+        println!("Copying Indexes...");
+        let copy_index_handles: Vec<_> = self
+            .processors
+            .into_iter()
+            .map(|processor| {
+                let dbs = Arc::clone(&self.dbs);
+                tokio::spawn(async move {
+                    processor.copy_indexes(&dbs).await;
+                })
+            })
+            .collect();
+
+        // Wait for all the copy_index threads to complete
+        join_all(copy_index_handles)
+            .await
+            .into_iter()
+            .collect::<Result<Vec<()>, _>>()?;
 
         Ok(())
     }
