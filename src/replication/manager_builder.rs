@@ -236,7 +236,7 @@ impl ReplicationManagerBuilder {
 
         let manager = ReplicationManager {
             dbs,
-            processors: self.processors,
+            processors: self.processors.into_iter().map(|p| p.into()).collect(),
             config: self.config,
             task_receiver,
             task_sender,

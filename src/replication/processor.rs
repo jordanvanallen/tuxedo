@@ -159,8 +159,6 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin + 'static> Pro
             }
         }
 
-        self.copy_indexes(&dbs).await;
-
         let batch_count = total_documents.div_ceil(batch_size as usize);
         let strategy = default_config.strategy;
         let write_options = default_config.write_options;
@@ -286,8 +284,6 @@ impl<T: Send + Sync + 'static> Processor for ReplicatorProcessor<T> {
                 batch_size = adaptive_batch_size;
             }
         }
-
-        self.copy_indexes(&dbs).await;
 
         let batch_count = total_documents.div_ceil(batch_size as usize);
         let write_options = default_config.write_options;
