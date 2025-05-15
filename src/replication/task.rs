@@ -273,7 +273,6 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
                 if let Err(e) = self
                     .dbs
                     .write::<T>(
-                        // Use typed write
                         &self.collection_name,
                         &write_batch,
                         self.config.write_options.clone().into(),
@@ -300,7 +299,6 @@ impl<T: Mask + Serialize + DeserializeOwned + Send + Sync + Unpin> Task for Mode
             if let Err(e) = self
                 .dbs
                 .write::<T>(
-                    // Use typed write
                     &self.collection_name,
                     &write_batch,
                     self.config.write_options.clone().into(),
