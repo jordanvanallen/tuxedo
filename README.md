@@ -8,7 +8,7 @@
 
 ```toml
 [dependencies]
-tuxedo = { version = "0.3.1" }
+tuxedo = { version = "0.5.0" }
 ```
 
 ## Usage
@@ -42,7 +42,8 @@ async fn main() -> TuxedoResult<()> {
         .source_db("source_db_name")
         .target_db("target_db_name")
         .batch_size(2500 as usize)
-        .strategy(ReplicationStrategy::Mask) 
+        .strategy(ReplicationStrategy::Mask)
+        .copy_views(true)
         .add_processor::<User>("users")
         .build()
         .await?;
@@ -62,6 +63,10 @@ They can be configured individually using a `ProcessorConfigBuilder` alongside t
 ### Replicators
 
 Replicators are used for collections that need to be replicated, but do not need to be masked. They have the benefit of not requiring a struct to replicate the data, but are also significantly slower as they as (de)serialized using a bson::Document, which is much less ideal then a defined struct. It is recommended for larger collections to use a struct and define the `Mask` trait with a NOP to avoid the masking portion, but allow for much faster replication speeds.
+
+### Views
+
+MongoDB views can be copied from source to target databases using the `copy_views(true)` configuration option. Views are automatically detected from the source database and recreated in the target database after all collections and indexes have been processed. This includes the view's underlying collection reference and aggregation pipeline.
 
 ## License
 
