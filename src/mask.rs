@@ -89,4 +89,3 @@ pub trait Mask {
         list.concat()
     }
 }
-
