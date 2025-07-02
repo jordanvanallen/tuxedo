@@ -233,14 +233,16 @@ impl ReplicationManagerBuilder {
             .iter()
             .map(|p| p.collection_name().to_string())
             .collect();
-        
+
         // Add view names if view copying is enabled
         if self.config.copy_views {
-            let view_names = dbs.get_source_view_names().await
+            let view_names = dbs
+                .get_source_view_names()
+                .await
                 .expect("Expected to successfully get source view names");
             items_to_drop.extend(view_names);
         }
-        
+
         dbs.clear_target_collections(&items_to_drop)
             .await
             .expect("Expected to successfully drop target database collections and views before replication");

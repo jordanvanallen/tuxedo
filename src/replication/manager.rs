@@ -127,7 +127,7 @@ impl ReplicationManager {
         // We do this after all the other data has transferred to prevent the overhead
         // of validations on every insert
         println!("Copying Indexes...");
-        
+
         let copy_index_handles: Vec<_> = self
             .processors
             .into_iter()
@@ -148,7 +148,7 @@ impl ReplicationManager {
         // Copy views if enabled
         if self.config.copy_views {
             println!("Copying Views...");
-            
+
             // Get all source views to copy
             let source_views = match self.dbs.list_source_views().await {
                 Ok(views) => views,
@@ -166,10 +166,7 @@ impl ReplicationManager {
                         let dbs = Arc::clone(&self.dbs);
                         tokio::spawn(async move {
                             if let Err(e) = dbs.copy_single_view(&view_spec).await {
-                                println!(
-                                    "Error copying view '{}': {:?}",
-                                    view_spec.name, e
-                                );
+                                println!("Error copying view '{}': {:?}", view_spec.name, e);
                             } else {
                                 println!("Successfully copied view: {}", view_spec.name);
                             }
