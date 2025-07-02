@@ -119,6 +119,11 @@ impl ReplicationManagerBuilder {
         self
     }
 
+    pub fn copy_views(mut self, enabled: bool) -> Self {
+        self.config.copy_views = enabled;
+        self
+    }
+
     pub fn optimize_for_performance(self, compression: bool) -> Self {
         let mut builder = self;
 
@@ -221,16 +226,24 @@ impl ReplicationManagerBuilder {
             .await
             .expect("Could not create test connection to target database");
 
-        println!("Dropping collections from target database before beginning...");
+        println!("Dropping collections and views from target database before beginning...");
         // Collect collection names from processors
-        let collection_names: Vec<String> = self
+        let mut items_to_drop: Vec<String> = self
             .processors
             .iter()
             .map(|p| p.collection_name().to_string())
             .collect();
-        dbs.clear_target_collections(&collection_names)
+        
+        // Add view names if view copying is enabled
+        if self.config.copy_views {
+            let view_names = dbs.get_source_view_names().await
+                .expect("Expected to successfully get source view names");
+            items_to_drop.extend(view_names);
+        }
+        
+        dbs.clear_target_collections(&items_to_drop)
             .await
-            .expect("Expected to successfully drop target database collections before replication");
+            .expect("Expected to successfully drop target database collections and views before replication");
 
         let (task_sender, task_receiver) = mpsc::channel(self.config.thread_count);
 

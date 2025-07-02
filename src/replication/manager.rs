@@ -18,6 +18,7 @@ pub(crate) struct ReplicationConfig {
     pub(crate) adaptive_batching: bool,
     pub(crate) write_options: InsertManyOptions,
     pub(crate) read_options: FindOptions,
+    pub(crate) copy_views: bool,
 }
 
 impl Default for ReplicationConfig {
@@ -33,6 +34,7 @@ impl Default for ReplicationConfig {
             write_options: Default::default(),
             read_options: Default::default(),
             adaptive_batching: false,
+            copy_views: false,
         }
     }
 }
@@ -125,6 +127,7 @@ impl ReplicationManager {
         // We do this after all the other data has transferred to prevent the overhead
         // of validations on every insert
         println!("Copying Indexes...");
+        
         let copy_index_handles: Vec<_> = self
             .processors
             .into_iter()
@@ -141,6 +144,45 @@ impl ReplicationManager {
             .await
             .into_iter()
             .collect::<Result<Vec<()>, _>>()?;
+
+        // Copy views if enabled
+        if self.config.copy_views {
+            println!("Copying Views...");
+            
+            // Get all source views to copy
+            let source_views = match self.dbs.list_source_views().await {
+                Ok(views) => views,
+                Err(e) => {
+                    println!("Error listing source views: {:?}", e);
+                    return Ok(());
+                }
+            };
+
+            if !source_views.is_empty() {
+                // Copy all views in parallel (like index copying)
+                let copy_view_handles: Vec<_> = source_views
+                    .into_iter()
+                    .map(|view_spec| {
+                        let dbs = Arc::clone(&self.dbs);
+                        tokio::spawn(async move {
+                            if let Err(e) = dbs.copy_single_view(&view_spec).await {
+                                println!(
+                                    "Error copying view '{}': {:?}",
+                                    view_spec.name, e
+                                );
+                            } else {
+                                println!("Successfully copied view: {}", view_spec.name);
+                            }
+                        })
+                    })
+                    .collect();
+
+                // Wait for all views to complete
+                let results = join_all(copy_view_handles).await;
+                let successful_count = results.into_iter().filter(|r| r.is_ok()).count();
+                println!("Copied {} views successfully", successful_count);
+            }
+        }
 
         Ok(())
     }
